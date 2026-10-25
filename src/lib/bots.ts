@@ -901,6 +901,75 @@ export async function runMacroBot(): Promise<{ items: number }> {
   })
 }
 
+// ─── ترمیم قطعی سناریوهای زمانی حمله ───
+// الزام کاربر: دورترین/میانه/نزدیک‌ترین روز حمله هرگز نباید خالی بمانند.
+// مدل گاهی null یا تاریخی خارج از پنجره ۱۴روزه برمی‌گرداند — این تابع از داده‌های موجود
+// (سناریوهای دیگر + پنجره الگوی کلان تاریخی + روز محتمل‌ترین) به‌صورت قطعی بازسازی می‌کند.
+export function repairAttackScenarios(input: {
+  today: string
+  predicted: string | null
+  near: string | null
+  mid: string | null
+  far: string | null
+  patternWindowHi?: number | null
+}): { predicted: string | null; near: string | null; mid: string | null; far: string | null } {
+  const base = new Date(input.today + 'T00:00:00Z').getTime()
+  const toDay = (d: string) => Math.round((new Date(d + 'T00:00:00Z').getTime() - base) / 86400000)
+  const toStr = (n: number) => new Date(base + n * 86400000).toISOString().slice(0, 10)
+  // همه سناریوها باید در پنجره ۰ تا ۱۴ روز از امروز باشند
+  const cl = (n: number) => Math.max(0, Math.min(14, n))
+
+  let predicted = input.predicted ? cl(toDay(input.predicted)) : null
+  let near = input.near ? cl(toDay(input.near)) : null
+  let mid = input.mid ? cl(toDay(input.mid)) : null
+  let far = input.far ? cl(toDay(input.far)) : null
+
+  // هیچ داده‌ای نیست — چیزی برای ترمیم وجود ندارد
+  if (predicted === null && near === null && mid === null && far === null) {
+    return { predicted: null, near: null, mid: null, far: null }
+  }
+
+  // محتمل‌ترین: اگر مدل نداد، میانه منطقی‌ترین جانشین است
+  if (predicted === null) predicted = mid ?? near ?? far
+
+  // دورترین: اول انتهای پنجره الگوی تاریخی بهترین تطبیق، بعد قرینه فاصله نزدیک→میانه
+  if (far === null) {
+    const pw = input.patternWindowHi
+    if (typeof pw === 'number' && pw >= 1 && pw <= 14) far = cl(pw)
+    else if (mid !== null) far = cl(mid + Math.max(2, near !== null ? mid - near : 3))
+    else if (predicted !== null) far = cl(predicted + 3)
+    else far = 10
+  }
+
+  // نزدیک‌ترین: کمی قبل از میانه/محتمل‌ترین/دورترین — اما نه عقب‌تر از امروز
+  if (near === null) {
+    const anchor = mid ?? predicted ?? far!
+    near = cl(Math.max(0, anchor - 2))
+  }
+
+  // میانه: نقطه میانی نزدیک و دور
+  if (mid === null) {
+    const midGap = Math.round((near! + far!) / 2)
+    mid = cl(Math.max(near! + 1, Math.min(far! - 1, midGap)))
+  }
+
+  // مرتب‌سازی صعودی با فاصله حداقل ۱ روز بین سه سناریو
+  const pts = [near!, mid!, far!].sort((a, b) => a - b)
+  let d1 = pts[0]
+  let d2 = pts[1]
+  let d3 = pts[2]
+  if (d2 <= d1) d2 = d1 + 1
+  if (d3 <= d2) d3 = d2 + 1
+  // بیرون‌زدگی از سقف پنجره ۱۴روزه → فشردن از انتها به عقب
+  if (d3 > 14) {
+    d3 = 14
+    if (d2 >= d3) d2 = 13
+    if (d1 >= d2) d1 = 12
+  }
+
+  return { predicted: toStr(predicted!), near: toStr(d1), mid: toStr(d2), far: toStr(d3) }
+}
+
 // ─── بات ۵: گزارش‌ساز هوش مصنوعی + پیش‌بینی روز حمله ───
 export async function runReportBot(force = false): Promise<{ items: number; skipped?: boolean }> {
   return logBot('report', async () => {
@@ -1041,7 +1110,7 @@ export async function runReportBot(force = false): Promise<{ items: number; skip
         {
           role: 'assistant',
           content:
-            'تو تحلیلگر ارشد ژئوپلیتیک و بازارهای مالی سامانه پایش ریسک جنگ ایران/اسرائیل/آمریکا هستی. داده‌های چند منبعی (خبر، بازار، پروازهای نظامی آمریکا، چرخه‌های زمانی، الگوهای کلان تاریخی) به تو داده می‌شود. وظایف: (1) گزارش فارسی مختصر و مبتنی بر داده بنویس (بدون حدس خارج از داده، با ساختار مارک‌داون ##). (2) بر اساس هم‌زمانی سه سیگنال — Risk-Off بازار (نفت/طلا بالا، سهام/بیت‌کوین پایین)، اخبار منفی حمله، و تحرک سوخت‌رسان/جنگنده آمریکا نزدیک ایران + پنجره‌های چرخه‌ای — چهار سناریوی زمانی حمله در ۱۴ روز آینده بده: «nearestAttackDate» نزدیک‌ترین روز ممکن (اگر تشدید ناگهانی رخ دهد)، «medianAttackDate» میانه پنجره محتمل، «farthestAttackDate» دورترین روز محتمل، و «predictedAttackDate» محتمل‌ترین روز طبق قضاوت تو. همه با قالب YYYY-MM-DD؛ اگر شواهد کافی نیست null بده و اطمینان پایین. (3) «الگوهای کلان تاریخی» را جدی بگیر: رفتار امروز بازار (نفت/طلا/سهام/VIX/بیت‌کوین) را با امضای پیش از بحران‌های تاریخی (مثل جنگ خلیج فارس ۱۹۹۰، اوکراین ۲۰۲۲، جنگ ۱۲روزه ۲۰۲۵) مقایسه کن؛ اگر شباهت بالاست، هم در گزارش بخش «روند کلان و پیش‌بینی الگویی» بنویس و هم پنجره زمانی (X تا Y روز) را در انتخاب سناریوهای زمانی لحاظ کن — پنجره تاریخی باید تقریباً با فاصله نزدیک تا دورتر منطبق شود. (4) از درس‌های پیش‌بینی‌های قبلی (اشتباهات) پند بگیر و الگوی اشتباه را تکرار نکن؛ نمونه منفی (مثل دریای سرخ ۲۰۲۴ که به جنگ بزرگ نرسید) را برای تردید منطقی به‌کار ببر. (5) اگر خبر خارجی مهمی هست معنی دقیقش را در تحلیل بیاور. در پایان گزارش بنویس که تحلیل «احتمالاتی» است نه قطعی. خروجی فقط و فقط JSON این ساختار باشد: {"reportFa": "متن مارک‌داون گزارش", "nearestAttackDate": "YYYY-MM-DD یا null", "medianAttackDate": "YYYY-MM-DD یا null", "farthestAttackDate": "YYYY-MM-DD یا null", "predictedAttackDate": "YYYY-MM-DD یا null", "attackConfidence": 0..100, "rationaleFa": "توضیح کوتاه پیش‌بینی و چهار سناریو"}',
+            'تو تحلیلگر ارشد ژئوپلیتیک و بازارهای مالی سامانه پایش ریسک جنگ ایران/اسرائیل/آمریکا هستی. داده‌های چند منبعی (خبر، بازار، پروازهای نظامی آمریکا، چرخه‌های زمانی، الگوهای کلان تاریخی) به تو داده می‌شود. وظایف: (1) گزارش فارسی مختصر و مبتنی بر داده بنویس (بدون حدس خارج از داده، با ساختار مارک‌داون ##). (2) بر اساس هم‌زمانی سه سیگنال — Risk-Off بازار (نفت/طلا بالا، سهام/بیت‌کوین پایین)، اخبار منفی حمله، و تحرک سوخت‌رسان/جنگنده آمریکا نزدیک ایران + پنجره‌های چرخه‌ای — چهار سناریوی زمانی حمله در ۱۴ روز آینده بده: «nearestAttackDate» نزدیک‌ترین روز ممکن (اگر تشدید ناگهانی رخ دهد)، «medianAttackDate» میانه پنجره محتمل، «farthestAttackDate» دورترین روز محتمل، و «predictedAttackDate» محتمل‌ترین روز طبق قضاوت تو. همه با قالب YYYY-MM-DD. الزام سخت: سه سناریوی nearest/median/farthest را همیشه کامل، متمایز و صعودی (نزدیک‌ترین < میانه < دورترین، هر سه داخل ۱۴ روز آینده) پر کن — برای هیچ‌کدام از این سه هرگز null نده؛ اگر شواهد کم است پنجره را پهن‌تر کن و حدس احتمالاتی بده. دورترین را با انتهای پنجره تاریخی الگوی برتر (پنجره_رویداد_روز) هماهنگ کن. فقط predictedAttackDate وقتی هیچ شواهدی نیست null است و آن‌گاه اطمینان پایین بده. (3) «الگوهای کلان تاریخی» را جدی بگیر: رفتار امروز بازار (نفت/طلا/سهام/VIX/بیت‌کوین) را با امضای پیش از بحران‌های تاریخی (مثل جنگ خلیج فارس ۱۹۹۰، اوکراین ۲۰۲۲، جنگ ۱۲روزه ۲۰۲۵) مقایسه کن؛ اگر شباهت بالاست، هم در گزارش بخش «روند کلان و پیش‌بینی الگویی» بنویس و هم پنجره زمانی (X تا Y روز) را در انتخاب سناریوهای زمانی لحاظ کن — پنجره تاریخی باید تقریباً با فاصله نزدیک تا دورتر منطبق شود. (4) از درس‌های پیش‌بینی‌های قبلی (اشتباهات) پند بگیر و الگوی اشتباه را تکرار نکن؛ نمونه منفی (مثل دریای سرخ ۲۰۲۴ که به جنگ بزرگ نرسید) را برای تردید منطقی به‌کار ببر. (5) اگر خبر خارجی مهمی هست معنی دقیقش را در تحلیل بیاور. در پایان گزارش بنویس که تحلیل «احتمالاتی» است نه قطعی. خروجی فقط و فقط JSON این ساختار باشد: {"reportFa": "متن مارک‌داون گزارش", "nearestAttackDate": "YYYY-MM-DD یا null", "medianAttackDate": "YYYY-MM-DD یا null", "farthestAttackDate": "YYYY-MM-DD یا null", "predictedAttackDate": "YYYY-MM-DD یا null", "attackConfidence": 0..100, "rationaleFa": "توضیح کوتاه پیش‌بینی و چهار سناریو"}',
         },
         {
           role: 'user',
@@ -1062,16 +1131,28 @@ export async function runReportBot(force = false): Promise<{ items: number; skip
     const content = parsed?.reportFa?.trim() || raw.trim()
     if (!content) throw new Error('پاسخ خالی از مدل')
 
-    // اعتبارسنجی تاریخ‌ها: همه باید در ۱۴ روز آینده باشند
-    const validDate = (v: string | null | undefined): string | null => {
-      if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return null
-      const diff = daysBetween(today, v)
-      return diff >= 0 && diff <= 14 ? v : null
-    }
-    const predicted = validDate(parsed?.predictedAttackDate)
-    const nearDate = validDate(parsed?.nearestAttackDate)
-    const midDate = validDate(parsed?.medianAttackDate)
-    const farDate = validDate(parsed?.farthestAttackDate)
+    // اعتبارسنجی تاریخ‌ها: پیش‌بینی اصلی باید در ۱۴ روز آینده باشد؛ سناریوها خام می‌روند
+    // تا repairAttackScenarios خارج‌ازپنجره را بُرش دهد و خالی‌ها را بازسازی کند
+    const rawValid = (v: string | null | undefined): string | null =>
+      v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null
+    const predicted = rawValid(parsed?.predictedAttackDate)
+      && daysBetween(today, parsed!.predictedAttackDate!) >= 0
+      && daysBetween(today, parsed!.predictedAttackDate!) <= 14
+      ? parsed!.predictedAttackDate!
+      : null
+    // ترمیم قطعی — الزام کاربر: دورترین/میانه/نزدیک هرگز خالی نمی‌مانند
+    const repaired = repairAttackScenarios({
+      today,
+      predicted,
+      near: rawValid(parsed?.nearestAttackDate),
+      mid: rawValid(parsed?.medianAttackDate),
+      far: rawValid(parsed?.farthestAttackDate),
+      patternWindowHi: macroPatterns[0]?.windowHi ?? null,
+    })
+    const nearDate = repaired.near
+    const midDate = repaired.mid
+    const farDate = repaired.far
+    const finalPredicted = repaired.predicted
     const confidence = Math.max(0, Math.min(100, Math.round(parsed?.attackConfidence ?? 0)))
     const rationale = (parsed?.rationaleFa ?? '').slice(0, 600)
 
@@ -1082,7 +1163,7 @@ export async function runReportBot(force = false): Promise<{ items: number; skip
     await db.riskDaily.updateMany({
       where: { date: today },
       data: {
-        predictedAttackDate: predicted,
+        predictedAttackDate: finalPredicted,
         attackDateNear: nearDate,
         attackDateMid: midDate,
         attackDateFar: farDate,
@@ -1102,7 +1183,7 @@ export async function runReportBot(force = false): Promise<{ items: number; skip
     }
     return {
       items: 1,
-      message: `گزارش با ${usedModel}${predicted ? ` | محتمل‌ترین: ${predicted} (${confidence}%)` : ''}${nearDate ? ` | نزدیک: ${nearDate}` : ''}${farDate ? ` | دور: ${farDate}` : ''}`,
+      message: `گزارش با ${usedModel}${finalPredicted ? ` | محتمل‌ترین: ${finalPredicted} (${confidence}%)` : ''}${nearDate ? ` | نزدیک: ${nearDate}` : ''}${midDate ? ` | میانه: ${midDate}` : ''}${farDate ? ` | دور: ${farDate}` : ''}`,
     }
   })
 }
