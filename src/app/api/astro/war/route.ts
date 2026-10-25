@@ -11,6 +11,7 @@ import {
   loadCustomMetas,
   customMetasInUse,
   warEntitiesInUse,
+  registerCycle40Entity,
   getCycleWindowChart,
   WAR_ENTITIES,
   WAR_PAIRS,
@@ -82,7 +83,7 @@ async function askAi(digest: string, prompt: string, maxTokens: number): Promise
   }
 }
 
-const AI_PROMPT = `بر اساس داده‌های زیر، پیشگویی استرولوژی جنگی بنویس.
+const AI_PROMPT_BODY = `بر اساس داده‌های زیر، پیشگویی استرولوژی جنگی بنویس.
 
 فقط JSON معتبر بده:
 {
@@ -93,9 +94,15 @@ const AI_PROMPT = `بر اساس داده‌های زیر، پیشگویی اس�
  "prediction": "پیشگویی سرفصل اصلی: ۴ تا ۷ جمله — کدام ماه‌ها خطرناک‌اند، چه نوع رویدادی (حمله مستقیم/نیابتی/تحریم/ترور/غافلگیری) در کدام پنجره محتمل‌تر است و سقف/کف اسکالاسیون چه می‌تواند باشد",
  "monthlyNote": "۲ تا ۳ جمله درباره گرفتگی‌ها و ماه‌های آینده"
 }
+`
+
+/** پویا — در لحظه درخواست ساخته می‌شود تا چرخه ۴۰روزه و چارت‌های دلخواه هم در فهرست شناسه‌ها باشند */
+function buildAiPrompt(): string {
+  return `${AI_PROMPT_BODY}
 شناسه چارت‌ها: ${warEntitiesInUse().map((e) => `${e.id}=${e.fa}`).join('، ')}.
-الزام: آرایه reads باید دقیقاً برای هر شناسه بالا یک عضو داشته باشد — از جمله چارت‌های دلخواه کاربر (شناسه‌های custom:...)؛ هیچ چارتی را جا نینداز.
+الزام: آرایه reads باید دقیقاً برای هر شناسه بالا یک عضو داشته باشد — از جمله چرخه ۴۰روزه (cycle40) و چارت‌های دلخواه کاربر (شناسه‌های custom:...)؛ هیچ چارتی را جا نینداز.
 در calls فقط از تاریخ‌هایی که در «پنجره‌های ترانزیتی» داده شده استفاده کن؛ چیزی از خودت تاریخ نساز. مهم‌ترین ۵ تا ۸ پنجره را انتخاب کن.`
+}
 
 // چرخه‌های ۴۰روزه گن/هرست از آتش‌بس — همان شواهدی که در امتیاز ریسک (cycleScore) و
 // انتخاب سناریوهای روز حمله استفاده می‌شوند؛ اگر جدول چرخه خالی بود محاسبه مستقیم می‌شود
@@ -158,15 +165,17 @@ export async function GET() {
     // چارت‌های دلخواه کاربر — باید قبل از هر محاسبه‌ای در رجیستری ثبت شوند تا
     // در پنجره‌ها، سینستری، دیجست AI و چارت‌ها حضور داشته باشند
     const customs = await loadCustomMetas()
+    // چارت رویدادی چرخه ۴۰روزه — مثل جنگ ۱۲روزه به رجیستری موجودیت‌ها می‌نشیند
+    const c40 = registerCycle40Entity()
     const agg = getWarAggregate()
-    // کش ساعتی AI — با تغییر چارت‌های دلخواه باطل شود
+    // کش ساعتی AI — با تغییر چارت‌های دلخواه یا جابه‌جایی پنجره ۴۰روزه باطل شود
     const customHash = customs.map((m) => m.id).join(',').slice(0, 60)
-    const key = `full-${new Date().toISOString().slice(0, 13)}-${customHash}`
+    const key = `full-${new Date().toISOString().slice(0, 13)}-${customHash}-c${c40?.isoUtc ?? 'x'}`
     let ai = aiCache.get(key) ?? null
     let aiSource: 'ai' | 'engine' = ai ? 'ai' : 'engine' // کش فقط حاوی نتایج موفق AI است
     if (!ai) {
       const digest = warAiDigest()
-      const result = await askAi(digest, AI_PROMPT, 3200)
+      const result = await askAi(digest, buildAiPrompt(), 3200)
       if (result) {
         ai = normalizeAiReads(result)
         aiSource = 'ai'
@@ -210,6 +219,7 @@ export async function POST(req: Request) {
     const a = body.a ?? 'iran'
     const b = body.b ?? 'israel'
     await loadCustomMetas() // برای پذیرش شناسه چارت‌های دلخواه
+    registerCycle40Entity() // برای پذیرش شناسه چرخه ۴۰روزه
     const ma = entityMeta(a)
     const mb = entityMeta(b)
 

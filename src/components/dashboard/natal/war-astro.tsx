@@ -209,12 +209,20 @@ export function WarAstroSection() {
     [data],
   )
 
+  // پرش به چارت کامل چرخه ۴۰روزه — انتخاب + اسکرول نرم به کارت جزئیات
+  const goCycle40 = useCallback(() => {
+    setSelEntity('cycle40')
+    window.setTimeout(() => {
+      document.getElementById('war-chart-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 120)
+  }, [])
+
   if (loading) {
     return (
       <Card className="border-zinc-800/70 bg-zinc-900/40">
         <CardContent className="flex flex-col items-center gap-3 py-14">
           <Loader2 className="h-7 w-7 animate-spin text-fuchsia-400" />
-          <p className="text-sm text-zinc-400">در حال محاسبه ۶ چارت، سینستری‌ها و پنجره‌های ۱۲۰ روزه…</p>
+          <p className="text-sm text-zinc-400">در حال محاسبه چارت‌ها، سینستری‌ها و پنجره‌های ۱۲۰ روزه…</p>
           <p className="text-[11px] text-zinc-600">ephermis دقیق + اسکن دوگانه‌بینی — تا ~۵ ثانیه</p>
         </CardContent>
       </Card>
@@ -261,7 +269,8 @@ export function WarAstroSection() {
               </div>
               <p className="text-[11px] leading-5 text-zinc-500">
                 چارت‌های پایه: تأسیس جمهوری اسلامی ۱۲فروردین۱۳۵۸، چارت سیبلی آمریکا ۱۷۷۶،
-                اعلام استقلال اسرائیل ۱۹۴۸، ترامپ (رده AA)، نتانیاهو (رده B)، چارت جنگ ۱۲روزه.
+                اعلام استقلال اسرائیل ۱۹۴۸، ترامپ (رده AA)، نتانیاهو (رده B)، چارت جنگ ۱۲روزه،
+                چرخه ۴۰روزه (پنجره بعدی از آتش‌بس) + چارت‌های دلخواه شما.
                 موتور: ephemeris دقیق + جنبه سخت با پنجره ±روز.
               </p>
             </div>
@@ -269,65 +278,66 @@ export function WarAstroSection() {
         </CardContent>
       </Card>
 
-      {/* ═══ چرخه‌های ۴۰روزه + چارت پنجره — شواهد عددی و آسمان پنجره ═══ */}
+      {/* ═══ چرخه‌های ۴۰روزه — شواهد عددی + پرش به چارت کامل رویدادی ═══ */}
       {data.cycles40.length > 0 && (
         <Card className="border-amber-900/40 bg-amber-950/10">
-          <CardContent className="p-4">
-            <div className="grid gap-5 lg:grid-cols-2">
-              <div className="space-y-2.5">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Timer className="h-4 w-4 text-amber-400" />
-                  <p className="text-xs font-bold text-amber-300">چرخه‌های ۴۰روزه از آتش‌بس — شواهد عددی مدل</p>
-                  <Badge variant="outline" className="border-zinc-700 text-[9px] text-zinc-500">گن + هرست</Badge>
-                </div>
-                <p className="text-[11px] leading-5 text-zinc-400">
-                  «جنگ ۴۰روزه» یک جنگ تاریخی نیست — عدد ۴۰ یک چرخه زمانی گن/هرست از آتش‌بس ۳ تیر ۱۴۰۴ است
-                  و مستقیماً در امتیاز چرخه ریسک و انتخاب سناریوهای روز حمله به‌کار می‌رود. چارت رویداد واقعی، جنگ ۱۲روزه است (۲۳ خرداد ۱۴۰۴):
+          <CardContent className="space-y-2.5 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Timer className="h-4 w-4 text-amber-400" />
+              <p className="text-xs font-bold text-amber-300">چرخه‌های ۴۰روزه از آتش‌بس — شواهد عددی مدل</p>
+              <Badge variant="outline" className="border-zinc-700 text-[9px] text-zinc-500">گن + هرست</Badge>
+            </div>
+            <p className="text-[11px] leading-5 text-zinc-400">
+              «جنگ ۴۰روزه» یک جنگ تاریخی نیست — عدد ۴۰ چرخه زمانی گن/هرست از آتش‌بس ۳ تیر ۱۴۰۴ است
+              و مستقیماً در امتیاز چرخه ریسک و سناریوهای روز حمله به‌کار می‌رود.
+              چارت رویدادی این پنجره — دقیقاً مثل چارت جنگ ۱۲روزه — به فهرست چارت‌ها اضافه شده است:
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {data.cycles40.map((c) => (
+                <Badge
+                  key={c.date}
+                  variant="outline"
+                  className="gap-1 border-amber-500/30 bg-amber-500/5 text-[10px] text-amber-200"
+                >
+                  <Timer className="h-3 w-3" />
+                  {faTxt(c.k)}×۴۰ · {faJDate(c.date)}
+                  {c.daysLeft > 0 ? ` · ${faTxt(c.daysLeft)} روز دیگر` : ' · امروز'}
+                  {c.families.includes('gann') && c.families.includes('hurst') ? ' · گن+هرست' : ''}
+                </Badge>
+              ))}
+            </div>
+            {data.windowChart && (
+              <div className="rounded-lg border border-amber-900/30 bg-amber-950/10 p-2.5">
+                <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold text-zinc-300">
+                  <CalendarClock className="h-3.5 w-3.5 text-amber-400" />
+                  جنبه‌های سخت آسمان پنجره {faJDate(data.windowChart.date)} ({faTxt(data.windowChart.k)}×۴۰) به چارت‌های لنگر:
                 </p>
                 <div className="flex flex-wrap gap-1.5">
-                  {data.cycles40.map((c) => (
-                    <Badge
-                      key={c.date}
-                      variant="outline"
-                      className="gap-1 border-amber-500/30 bg-amber-500/5 text-[10px] text-amber-200"
-                    >
-                      <Timer className="h-3 w-3" />
-                      {faTxt(c.k)}×۴۰ · {faJDate(c.date)}
-                      {c.daysLeft > 0 ? ` · ${faTxt(c.daysLeft)} روز دیگر` : ' · امروز'}
-                      {c.families.includes('gann') && c.families.includes('hurst') ? ' · گن+هرست' : ''}
-                    </Badge>
+                  {data.windowChart.aspects.slice(0, 8).map((a, i) => (
+                    <span key={i} className="rounded-lg border border-orange-500/25 bg-orange-500/5 px-2 py-1 text-[10px] text-zinc-300">
+                      <b className="text-orange-300">{faTxt(a.transitFa)}</b> {faTxt(a.aspectFa)}{' '}
+                      <b className="text-zinc-100">{faTxt(a.targetFa)}</b>
+                      <span className="text-zinc-500"> «{faTxt(a.entityFa)}»</span>
+                      <span className="text-zinc-600"> ({faTxt(a.orb)}°)</span>
+                    </span>
                   ))}
+                  {data.windowChart.aspects.length === 0 && (
+                    <span className="text-[10px] text-zinc-600">جنبه سخت مهمی در این پنجره به چارت‌های لنگر نیست</span>
+                  )}
                 </div>
               </div>
-              {data.windowChart && (
-                <div>
-                  <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-amber-300">
-                    <CalendarClock className="h-4 w-4 text-amber-400" />
-                    چارت پنجره ۴۰روزه بعدی — آسمان {faJDate(data.windowChart.date)} ({faTxt(data.windowChart.k)}×۴۰) بر تهران
-                  </p>
-                  <div className="flex items-start gap-3">
-                    <div className="w-40 shrink-0 sm:w-48">
-                      <ZodiacWheel western={data.windowChart.western} />
-                      <p className="mt-1 text-center text-[9px] text-zinc-600">ظهر روز پنجره — چارت انتخابی</p>
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="mb-1 text-[10px] font-bold text-zinc-400">جنبه‌های سخت به چارت‌های لنگر (جنگ ۱۲روزه/ایران/اسرائیل):</p>
-                      {data.windowChart.aspects.slice(0, 7).map((a, i) => (
-                        <p key={i} className="text-[10px] leading-4 text-zinc-400">
-                          • <b className="text-orange-300">{faTxt(a.transitFa)}</b> {faTxt(a.aspectFa)}{' '}
-                          <b className="text-zinc-100">{faTxt(a.targetFa)}</b>
-                          <span className="text-zinc-500"> «{faTxt(a.entityFa)}»</span>
-                          <span className="text-zinc-600"> ({faTxt(a.orb)}°)</span>
-                        </p>
-                      ))}
-                      {data.windowChart.aspects.length === 0 && (
-                        <p className="text-[10px] text-zinc-600">جنبه سخت مهمی در این پنجره به چارت‌های لنگر نیست</p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
+            )}
+            {data.entities.some((e) => e.meta.id === 'cycle40') && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={goCycle40}
+                className="gap-2 border-amber-500/40 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25"
+              >
+                <CalendarClock className="h-3.5 w-3.5" />
+                دیدن چارت کامل چرخه ۴۰روزه — مثل چارت جنگ ۱۲روزه
+              </Button>
+            )}
           </CardContent>
         </Card>
       )}
@@ -340,7 +350,7 @@ export function WarAstroSection() {
         <h3 className="mb-2 flex items-center gap-2 text-sm font-bold text-zinc-200">
           <Landmark className="h-4 w-4 text-red-400" /> چارت‌های پایه پیشگویی
         </h3>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
           {data.entities.map((e) => {
             const active = e.meta.id === selEntity
             const km = KIND_META[e.meta.kind]
@@ -369,7 +379,7 @@ export function WarAstroSection() {
 
       {/* ═══ جزئیات چارت انتخاب‌شده ═══ */}
       {entity && (
-        <Card className="border-zinc-800/70 bg-zinc-900/40">
+        <Card id="war-chart-detail" className="scroll-mt-4 border-zinc-800/70 bg-zinc-900/40">
           <CardContent className="p-5">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <h3 className="flex items-center gap-2 text-sm font-bold text-zinc-200">

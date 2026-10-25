@@ -109,10 +109,68 @@ export const WAR_PAIRS: { a: string; b: string; label: string }[] = [
   { a: 'trump', b: 'netanyahu', label: 'متحدان عملیاتی' },
   { a: 'war12', b: 'iran', label: 'چرخه جنگ با میزبان' },
   { a: 'war12', b: 'israel', label: 'چرخه جنگ با آغازگر' },
+  { a: 'cycle40', b: 'war12', label: 'پنجره ۴۰روزه بر لحظه آغاز جنگ' },
+  { a: 'cycle40', b: 'iran', label: 'آسمان پنجره ۴۰روزه بر چارت ایران' },
+  { a: 'cycle40', b: 'israel', label: 'پنجره ۴۰روزه بر چارت اسرائیل' },
 ]
 
+// ═══ چارت رویدادی چرخه ۴۰روزه — entity کامل مثل جنگ ۱۲روزه ═══
+
+export const CYCLE40_ID = 'cycle40'
+let cycle40Meta: WarEntityMeta | null = null
+
+const faNum = (n: number) => String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)])
+
+/** محاسبه و ثبت چرخه ۴۰روزه بعدی (آتش‌بس + k×۴۰، ظهر تهران) به‌عنوان چارت رویداد کامل —
+ *  خروجی: متادیتا (یا null). هر بار که پنجره عوض شود کش چارت/سینستری/روز باطل می‌شود */
+export function registerCycle40Entity(): WarEntityMeta | null {
+  const today = tehranDateStr()
+  const end = new Date(WAR_12_END + 'T00:00:00Z')
+  let k = 1
+  let date = ''
+  for (; k <= 40; k++) {
+    const ds = new Date(end.getTime() + WINDOW_40 * k * DAY_MS).toISOString().slice(0, 10)
+    if (ds >= today) {
+      date = ds
+      break
+    }
+  }
+  if (!date) return null
+  // ظهر تهران (۱۲:۰۰ به وقت محل = ۰۸:۳۰ UTC با آفست ثابت ‎+03:30 ایران)
+  const at = new Date(date + 'T08:30:00Z')
+  const j = utcToJalaliTehran(at)
+  const meta: WarEntityMeta = {
+    id: CYCLE40_ID,
+    fa: `چرخه ۴۰روزه (${faNum(k)}×۴۰) از آتش‌بس`,
+    short: 'چرخه ۴۰روزه',
+    flag: '⏳',
+    kind: 'event',
+    isoUtc: at.toISOString(),
+    lat: 35.6892,
+    lon: 51.389,
+    placeFa: 'تهران',
+    chartFa: `${faNum(j.jd)} ${jalaliMonthLabel(j.jy, j.jm).split(' ')[0]} ${faNum(j.jy)} — ۱۲:۰۰ تهران، اتمام چرخه ${faNum(k)}×۴۰ از آتش‌بس ۳ تیر ۱۴۰۴`,
+    sourceNote: 'چارت رویدادی پنجره ۴۰روزه گن/هرست — آسمان ظهر روز اتمام چرخه، با همان موتور دقیق ephemeris؛ چرخه بعدی خودش را جابه‌جا می‌کند',
+    hotRole: 'پنجره زمانی چرخه ۴۰ — نقشه آسمان لحظه اتمام چرخه از آتش‌بس',
+  }
+  const prev = cycle40Meta
+  cycle40Meta = meta
+  if (!prev || prev.isoUtc !== meta.isoUtc || prev.chartFa !== meta.chartFa) {
+    // پنجره عوض شده — کش‌های وابسته را باطل کن
+    chartCache.delete(CYCLE40_ID)
+    for (const key of [...synastryCache.keys()]) {
+      if (key.includes(CYCLE40_ID)) synastryCache.delete(key)
+    }
+    dayCache.clear()
+  }
+  return meta
+}
+
 export function entityMeta(id: string): WarEntityMeta {
-  const m = WAR_ENTITIES.find((x) => x.id === id) ?? customRegistry.get(id)
+  const m =
+    WAR_ENTITIES.find((x) => x.id === id) ??
+    customRegistry.get(id) ??
+    (id === CYCLE40_ID ? cycle40Meta : undefined)
   if (!m) throw new Error(`چارت ناشناخته: ${id}`)
   return m
 }
@@ -141,7 +199,7 @@ export async function loadCustomMetas(): Promise<WarEntityMeta[]> {
         lat: r.lat,
         lon: r.lon,
         placeFa: r.placeFa,
-        chartFa: `${j.jd} ${jalaliMonthLabel(j.jy, j.jm).split(' ')[0]} ${j.jy} — ساعت ${hhmm} محل (${r.placeFa})`,
+        chartFa: `${faNum(j.jd)} ${jalaliMonthLabel(j.jy, j.jm).split(' ')[0]} ${faNum(j.jy)} — ساعت ${faNum(hhmm)} محل (${r.placeFa})`,
         sourceNote: 'چارت دلخواه افزوده‌شده توسط کاربر — با همان موتور دقیق ephemeris محاسبه می‌شود',
         hotRole: 'چارت انتخابی کاربر — در سینستری، پنجره‌ها و تحلیل AI فعال',
       }
@@ -162,9 +220,9 @@ export function customMetasInUse(): WarEntityMeta[] {
   return [...customRegistry.values()]
 }
 
-/** همه چارت‌های فعال: پایه ثابت + دلخواه کاربر */
+/** همه چارت‌های فعال: پایه ثابت + چرخه ۴۰روزه + دلخواه کاربر */
 export function warEntitiesInUse(): WarEntityMeta[] {
-  return [...WAR_ENTITIES, ...customRegistry.values()]
+  return [...WAR_ENTITIES, ...(cycle40Meta ? [cycle40Meta] : []), ...customRegistry.values()]
 }
 
 // ═══ ۲) محاسبه چارت موجودیت — همان موتور چارت تولد ═══
@@ -355,6 +413,7 @@ const RELATION_PRIOR: Record<string, number> = {
   'israel|netanyahu': 40, 'israel|trump': 30, 'israel|usa': 28, 'israel|war12': 54,
   'netanyahu|trump': 22, 'netanyahu|usa': 30, 'netanyahu|war12': 48,
   'trump|usa': 40, 'trump|war12': 40, 'usa|war12': 44,
+  'cycle40|war12': 66, 'cycle40|iran': 58, 'cycle40|israel': 52,
 }
 
 const synastryCache = new Map<string, WarSynastry>()
@@ -721,7 +780,7 @@ export interface CycleWindowAspect {
   orb: number
 }
 
-/** چارت آسمان در پنجره ۴۰روزه بعدی از آتش‌بس — همان چیزی که کاربر «چارت جنگ ۴۰روزه» می‌نامد */
+/** جنبه‌های سخت آسمان پنجره ۴۰روزه به چارت‌های لنگر — از چارت ثبت‌شده cycle40 استفاده می‌کند */
 export interface CycleWindowChart {
   date: string
   k: number
@@ -734,21 +793,10 @@ export interface CycleWindowChart {
 const WINDOW_ANCHORS = ['war12', 'iran', 'israel'] as const
 
 export function getCycleWindowChart(): CycleWindowChart | null {
-  const today = tehranDateStr()
-  const end = new Date(WAR_12_END + 'T00:00:00Z')
-  let k = 1
-  let date = ''
-  for (; k <= 40; k++) {
-    const ds = new Date(end.getTime() + WINDOW_40 * k * DAY_MS).toISOString().slice(0, 10)
-    if (ds >= today) {
-      date = ds
-      break
-    }
-  }
-  if (!date) return null
-  // ظهر تهران (۱۲:۰۰ به وقت محل = ۰۸:۳۰ UTC با آفست ثابت ‎+03:30 ایران)
-  const at = new Date(date + 'T08:30:00Z')
-  const western = computeWestern(at, 35.6892, 51.389)
+  const meta = registerCycle40Entity()
+  if (!meta) return null
+  const at = new Date(meta.isoUtc)
+  const western = getEntityChart(CYCLE40_ID).western
   const sky = hotPoints(western)
   const aspects: CycleWindowAspect[] = []
   for (const anchorId of WINDOW_ANCHORS) {
@@ -775,8 +823,8 @@ export function getCycleWindowChart(): CycleWindowChart | null {
   }
   aspects.sort((a, b) => a.orb - b.orb)
   return {
-    date,
-    k,
+    date: at.toISOString().slice(0, 10),
+    k: Math.max(1, Math.round((at.getTime() - new Date(WAR_12_END + 'T00:00:00Z').getTime()) / (WINDOW_40 * DAY_MS))),
     jalali: jalaliOf(at),
     utcNoon: at.toISOString(),
     western,
