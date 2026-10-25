@@ -25,6 +25,7 @@ import {
 } from '@/lib/fetchers'
 import { tehranDateStr, addDays, daysBetween } from '@/lib/tehran'
 import { isRelevantNews } from '@/lib/relevance'
+import { detectLang, needsFa } from '@/lib/lang'
 
 // ─── منابع کاربر (فقط همین‌ها مجازند — منابع داخلی ایران ممنوع) ───
 const USER_SOURCES: Array<{
@@ -255,7 +256,9 @@ async function ingestFromSource(
         content: r.title.slice(0, 2000),
         url: r.url,
         externalId: id,
-        lang: s.lang,
+        // زبان واقعی از روی متن خبر تشخیص داده می‌شود نه از برچسب منبع —
+        // یک کانال فارسی ممکن است عربی/چینی/انگلیسی پست کند و باید ترجمه شود
+        lang: detectLang(r.title),
         publishedAt: r.publishedAt,
         tensionScore: t.score,
         level: t.level,
@@ -457,19 +460,22 @@ export async function enrichNewsWithAi(): Promise<{ items: number }> {
 
 // ─── تضمین ترجمه: هر خبر غیرفارسی بدون ترجمه باید فارسی شود (انگلیسی/عربی/فرانسوی/...) ───
 export async function translatePendingNews(): Promise<{ items: number }> {
-  const pending = await db.newsItem.findMany({
+  const candidates = await db.newsItem.findMany({
     where: {
-      lang: { not: 'fa' },
       textFa: null,
       isAd: false,
-      publishedAt: { gte: addDays(new Date(), -3) },
+      // ۱۲ روز: هم‌پوشان با پنجره ingest (۱۰ روز) — خبر خارجی نباید از صف ترجمه بیفتد بیرون
+      publishedAt: { gte: addDays(new Date(), -12) },
       title: { not: '' },
       aiVerdict: { not: 'irrelevant' },
     },
     orderBy: { publishedAt: 'desc' },
-    take: 30,
+    take: 90,
     select: { id: true, title: true },
   })
+  // زبان ذخیره‌شده ممکن است اشتباه باشد (منبع «فارسی» با متن عربی) —
+  // ملاک فقط متن واقعی است، نه فیلد lang
+  const pending = candidates.filter((p) => needsFa(p.title)).slice(0, 30)
   if (!pending.length) return { items: 0 }
 
   const raw = await aiChatCompletion({
@@ -499,7 +505,11 @@ export async function translatePendingNews(): Promise<{ items: number }> {
     try {
       await db.newsItem.update({
         where: { id: pending[v.i].id },
-        data: { textFa: v.fa.slice(0, 500) },
+        data: {
+          textFa: v.fa.slice(0, 500),
+          // اصلاح زبان ذخیره‌شده بر اساس متن واقعی
+          lang: detectLang(pending[v.i].title),
+        },
       })
       updated++
     } catch {
@@ -1118,8 +1128,7 @@ export async function runAllBots(force = false): Promise<RunSummary[]> {
       const r = await runNewsBot()
       try {
         await enrichNewsWithAi() // ترجمه فارسی + حکم هوش مصنوعی + فیلتر تبلیغ/نامرتبط
-        // تضمین ترجمه: باقی‌مانده اخبار غیرفارسی بدون ترجمه (دو دور) — انگلیسی/عربی/فرانسوی و...
-        await translatePendingNews()
+        // تضمین ترجمه: باقی‌مانده اخبار غیرفارسی بدون ترجمه — انگلیسی/عربی/چینی/فرانسوی و...
         await translatePendingNews()
       } catch {
         // تحلیل هوش مصنوعی اختیاری است — خطا مسیر اصلی را نمی‌شکند

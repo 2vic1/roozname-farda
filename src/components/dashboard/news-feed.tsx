@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import { levelMeta, langFa, relTimeFa, SOURCE_TYPE_FA, verdictMeta } from './types'
 import type { NewsData, SourceType, Verdict } from './types'
+import { detectLang, needsFa } from '@/lib/lang'
 
 type VerdictFilter = 'all' | 'analyzable' | Verdict
 type TypeFilter = 'all' | SourceType
@@ -126,6 +127,9 @@ export function NewsFeed({ news }: { news: NewsData[] }) {
           const verdict = verdictMeta(n.aiVerdict)
           const SourceIcon = SOURCE_TYPE_ICON[n.sourceType] ?? Globe
           const keywords = parseKeywords(n.keywords)
+          // خبر خارجی بر اساس متن واقعی تشخیص داده می‌شود نه فیلد lang (ممکن است اشتباه ذخیره شده باشد)
+          const foreign = needsFa(n.title)
+          const dispLang = foreign && n.lang === 'fa' ? detectLang(n.title) : n.lang
 
           return (
             <article key={n.id} className="px-4 py-3.5 transition-colors hover:bg-zinc-800/30">
@@ -137,7 +141,7 @@ export function NewsFeed({ news }: { news: NewsData[] }) {
                 />
                 <div className="min-w-0 flex-1">
                   {/* متن اصلی: برای خبر غیرفارسی، ترجمه فارسی در اولویت نمایش است */}
-                  {n.lang !== 'fa' && n.textFa ? (
+                  {foreign && n.textFa ? (
                     <>
                       <a
                         href={n.url ?? undefined}
@@ -174,7 +178,7 @@ export function NewsFeed({ news }: { news: NewsData[] }) {
                   )}
 
                   {/* ترجمه فارسی (فقط برای خبرهای فارسی‌زبان که ترجمه‌شان جدا نمایش داده شود) */}
-                  {n.textFa && n.lang === 'fa' && n.textFa !== n.title && (
+                  {n.textFa && !foreign && n.textFa !== n.title && (
                     <div className="mt-2 rounded-lg border border-amber-500/20 bg-zinc-950/60 p-2.5">
                       <p className="mb-1 flex items-center gap-1 text-[10px] font-semibold text-amber-400">
                         <Languages className="h-3 w-3" />
@@ -185,7 +189,7 @@ export function NewsFeed({ news }: { news: NewsData[] }) {
                   )}
 
                   {/* خبر غیرفارسی بدون ترجمه — در صف ترجمه */}
-                  {n.lang !== 'fa' && !n.textFa && (
+                  {foreign && !n.textFa && (
                     <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-zinc-600">
                       <Languages className="h-3 w-3 animate-pulse" />
                       ترجمه فارسی در حال آماده‌سازی…
@@ -204,14 +208,14 @@ export function NewsFeed({ news }: { news: NewsData[] }) {
                     <span className="font-medium text-zinc-400">{n.sourceLabel}</span>
 
                     {/* زبان خبر */}
-                    {n.lang !== 'fa' && (
+                    {foreign && (
                       <Badge
                         variant="outline"
                         className="h-5 gap-1 border-sky-900/60 bg-sky-950/30 px-1.5 text-[10px] font-normal text-sky-300/80"
                         title="زبان اصلی خبر — ترجمه فارسی نمایش داده شده است"
                       >
                         <Globe className="h-2.5 w-2.5" />
-                        {langFa(n.lang)}
+                        {langFa(dispLang)}
                       </Badge>
                     )}
                     <span dir="ltr" className="text-zinc-600">·</span>

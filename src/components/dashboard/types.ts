@@ -314,6 +314,9 @@ export const LANG_FA: Record<string, string> = {
   ru: 'روسی',
   es: 'اسپانیایی',
   de: 'آلمانی',
+  zh: 'چینی',
+  ja: 'ژاپنی',
+  ko: 'کره‌ای',
 }
 
 export function langFa(lang: string): string {
