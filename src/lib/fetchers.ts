@@ -237,18 +237,28 @@ export async function fetchYahooSeries(symbol: string, range = '1y'): Promise<Se
 }
 
 export async function fetchBinanceSeries(symbol: string, limit = 365): Promise<SeriesPoint[]> {
-  const klines = await fetchJson<Array<Array<number | string>>>(
-    `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1d&limit=${limit}`
-  )
-  const out = klines.map((k) => ({
-    date: new Date(Number(k[0])).toISOString().slice(0, 10),
-    open: parseFloat(String(k[1])),
-    high: parseFloat(String(k[2])),
-    low: parseFloat(String(k[3])),
-    close: parseFloat(String(k[4])),
-  }))
-  if (out.length < 30) throw new Error(`short binance series for ${symbol}`)
-  return out
+  try {
+    const klines = await fetchJson<Array<Array<number | string>>>(
+      `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1d&limit=${limit}`
+    )
+    const out = klines.map((k) => ({
+      date: new Date(Number(k[0])).toISOString().slice(0, 10),
+      open: parseFloat(String(k[1])),
+      high: parseFloat(String(k[2])),
+      low: parseFloat(String(k[3])),
+      close: parseFloat(String(k[4])),
+    }))
+    if (out.length < 30) throw new Error(`short binance series for ${symbol}`)
+    return out
+  } catch (e) {
+    // بایننس موقتاً محدود کرده (HTTP 418/429) یا خطای شبکه — فالبک بی‌درنگ به کندل‌های یاهو
+    // تا کاربر هرگز ارور خام نبیند و محاسبه پیش‌بینی نشکند
+    try {
+      return await fetchYahooSeries(binanceToYahoo(symbol), '1y')
+    } catch {
+      throw e
+    }
+  }
 }
 
 // ─── تریدینگ‌ویو (مرجع مستقل: برنت واقعی ICE، WTI نیومکس، اسپات طلا و نقره) ───
@@ -283,21 +293,35 @@ export async function fetchTradingViewQuotes(
 }
 
 // ─── بایننس (کریپتو) ───
+// بایننس گاهی IP را موقتاً محدود می‌کند (HTTP 418/429) — معادل یاهو برای فالبک بی‌درنگ
+export function binanceToYahoo(symbol: string): string {
+  return symbol.endsWith('USDT') ? `${symbol.slice(0, -4)}-USD` : symbol
+}
+
 export async function fetchBinance(symbol: string): Promise<QuoteResult> {
-  const klines = await fetchJson<Array<Array<number | string>>>(
-    `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1d&limit=35`
-  )
-  const closes = klines.map((k) => parseFloat(String(k[4])))
-  const ticker = await fetchJson<{ lastPrice: string }>(
-    `https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`
-  )
-  const price = parseFloat(ticker.lastPrice) || closes[closes.length - 1]
-  return {
-    price,
-    closes,
-    change1d: pctFrom(closes, 1),
-    change7d: pctFrom(closes, 5),
-    change30d: pctFrom(closes, 21),
+  try {
+    const klines = await fetchJson<Array<Array<number | string>>>(
+      `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1d&limit=35`
+    )
+    const closes = klines.map((k) => parseFloat(String(k[4])))
+    const ticker = await fetchJson<{ lastPrice: string }>(
+      `https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`
+    )
+    const price = parseFloat(ticker.lastPrice) || closes[closes.length - 1]
+    return {
+      price,
+      closes,
+      change1d: pctFrom(closes, 1),
+      change7d: pctFrom(closes, 5),
+      change30d: pctFrom(closes, 21),
+    }
+  } catch (e) {
+    // فالبک: کندل‌های BTC-USD/ETH-USD یاهو همان داده را می‌دهند
+    try {
+      return await fetchYahoo(binanceToYahoo(symbol))
+    } catch {
+      throw e
+    }
   }
 }
 

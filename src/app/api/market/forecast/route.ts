@@ -8,6 +8,9 @@ export const dynamic = 'force-dynamic'
 // کش ساعتی هر نماد — محاسبه سنگین (ephs + fetch تاریخچه) تکرار نمی‌شود
 const cache = new Map<string, { at: number; payload: ForecastPayload }>()
 const TTL_MS = 60 * 60000
+// کول‌داون force: بایننس درخواست‌های پشت‌سرهم را با HTTP 418 بن می‌کند —
+// محاسبه مجدد داخل ۴۵ ثانیه همان داده کش را برمی‌گرداند
+const FORCE_COOLDOWN_MS = 45_000
 
 export async function GET(req: Request) {
   const url = new URL(req.url)
@@ -23,7 +26,7 @@ export async function GET(req: Request) {
   }
 
   const cached = cache.get(symbol)
-  if (!force && cached && Date.now() - cached.at < TTL_MS) {
+  if (cached && Date.now() - cached.at < (force ? FORCE_COOLDOWN_MS : TTL_MS)) {
     return NextResponse.json(cached.payload)
   }
 

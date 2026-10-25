@@ -17,6 +17,15 @@ import {
 import { faDateShort, faNum } from './types'
 import type { ForecastPayload, PathPoint, KeyCall, CandlePoint } from '@/lib/market-forecast'
 
+// پیام خطای خام (مثل HTTP 418 بایننس) → جمله فارسی قابل فهم برای کاربر
+function friendlyForecastError(msg: string): string {
+  if (/HTTP 418|HTTP 429/.test(msg))
+    return 'سرویس بایننس موقتاً این سرور را محدود کرده — یک دقیقه صبر کن و «تلاش دوباره» بزن؛ تا آن‌موقع داده از منبع جایگزین (یاهو) خوانده می‌شود'
+  if (/HTTP 451|blocked/.test(msg))
+    return 'دسترسی به منبع داده موقتاً مسدود شده — چند دقیقه بعد دوباره امتحان کن'
+  return msg
+}
+
 // ─── پنل پیش‌بینی ۳۰روزه — تکنیکال / چرخه‌ها / استرولوژی مالی / ترکیب همه ───
 // چارت کندل‌استیک: کندل واقعی + ادامه کندل پیش‌بینی با رنگ روش + دقت‌سنجی روزبه‌روز
 
@@ -547,7 +556,7 @@ function AccuracySection({ symbol, method }: { symbol: string; method: MethodKey
       const res = await fetch(`/api/market/forecast/track?symbol=${encodeURIComponent(sym)}${force ? '&force=1' : ''}`, { cache: 'no-store' })
       const j = (await res.json()) as TrackPayload | { ok: false; error: string }
       if ('ok' in j && j.ok) setTrack(j)
-      else setError(('error' in j && j.error) || 'خطا در دقت‌سنجی')
+      else setError(friendlyForecastError(('error' in j && j.error) || 'خطا در دقت‌سنجی'))
     } catch {
       setError('خطای شبکه در دقت‌سنجی')
     } finally {
@@ -733,7 +742,7 @@ export function ForecastPanel() {
       if ('ok' in j && j.ok) {
         setData((d) => ({ ...d, [sym]: j as ForecastPayload }))
       } else {
-        setError(('error' in j && j.error) || 'خطا در محاسبه پیش‌بینی')
+        setError(friendlyForecastError(('error' in j && j.error) || 'خطا در محاسبه پیش‌بینی'))
       }
     } catch {
       setError('خطای شبکه در دریافت پیش‌بینی')
