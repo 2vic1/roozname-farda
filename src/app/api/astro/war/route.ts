@@ -8,7 +8,7 @@ import {
   warAiDigest,
   warFallbackAi,
   entityMeta,
-  loadCustomMetas,
+  registerCustomMetas,
   customMetasInUse,
   warEntitiesInUse,
   registerCycle40Entity,
@@ -162,48 +162,9 @@ async function getCycles40(): Promise<WarCycle40[]> {
 
 export async function GET() {
   try {
-    // چارت‌های دلخواه کاربر — باید قبل از هر محاسبه‌ای در رجیستری ثبت شوند تا
-    // در پنجره‌ها، سینستری، دیجست AI و چارت‌ها حضور داشته باشند
-    const customs = await loadCustomMetas()
-    // چارت رویدادی چرخه ۴۰روزه — مثل جنگ ۱۲روزه به رجیستری موجودیت‌ها می‌نشیند
-    const c40 = registerCycle40Entity()
-    const agg = getWarAggregate()
-    // کش ساعتی AI — با تغییر چارت‌های دلخواه یا جابه‌جایی پنجره ۴۰روزه باطل شود
-    const customHash = customs.map((m) => m.id).join(',').slice(0, 60)
-    const key = `full-${new Date().toISOString().slice(0, 13)}-${customHash}-c${c40?.isoUtc ?? 'x'}`
-    let ai = aiCache.get(key) ?? null
-    let aiSource: 'ai' | 'engine' = ai ? 'ai' : 'engine' // کش فقط حاوی نتایج موفق AI است
-    if (!ai) {
-      const digest = warAiDigest()
-      const result = await askAi(digest, buildAiPrompt(), 3200)
-      if (result) {
-        ai = normalizeAiReads(result)
-        aiSource = 'ai'
-        aiCache.set(key, ai)
-      }
-    }
-    if (!ai) ai = warFallbackAi()
-
-    // سینستری چارت‌های دلخواه با سه کنشگر اصلی — تا در تحلیل استفاده شوند
-    const customPairs = customMetasInUse().flatMap((m) => [
-      { a: m.id, b: 'iran', label: 'چارت دلخواه کاربر ↔ ایران' },
-      { a: m.id, b: 'israel', label: 'چارت دلخواه کاربر ↔ اسرائیل' },
-      { a: m.id, b: 'usa', label: 'چارت دلخواه کاربر ↔ آمریکا' },
-    ])
-
-    return NextResponse.json({
-      ok: true,
-      generatedAtIso: new Date().toISOString(),
-      warIndex: agg.index,
-      entities: warEntitiesInUse().map((m) => getEntityChart(m.id)),
-      pairs: [...WAR_PAIRS.map((p) => getSynastry(p.a, p.b)), ...customPairs.map((p) => getSynastry(p.a, p.b))],
-      windows: agg.windows.slice(0, 60),
-      eclipses: agg.eclipses,
-      cycles40: await getCycles40(),
-      windowChart: getCycleWindowChart(),
-      ai,
-      aiSource,
-    })
+    // GET بدون بدنه — فقط چارت‌های پایه (چارت‌های دلخواه فقط با POST همراه بدنه می‌آیند)
+    registerCustomMetas([])
+    return NextResponse.json({ ok: true, ...(await fullPayload()) })
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : 'خطای موتور استرولوزی جنگ' },
@@ -212,14 +173,66 @@ export async function GET() {
   }
 }
 
-// تحلیل عمیق جفتی — سینستری + پنجره‌های متمرکز دو چارت
+/** پیلود کامل استرولوزی — چارت‌های دلخواه باید قبل از صدا زدن در رجیستری ثبت شده باشند */
+async function fullPayload(): Promise<Record<string, unknown>> {
+  // چارت رویدادی چرخه ۴۰روزه — مثل جنگ ۱۲روزه به رجیستری موجودیت‌ها می‌نشیند
+  const c40 = registerCycle40Entity()
+  const agg = getWarAggregate()
+  // کش ساعتی AI — با تغییر چارت‌های دلخواه یا جابه‌جایی پنجره ۴۰روزه باطل شود
+  const customHash = customMetasInUse().map((m) => m.id).join(',').slice(0, 60)
+  const key = `full-${new Date().toISOString().slice(0, 13)}-${customHash}-c${c40?.isoUtc ?? 'x'}`
+  let ai = aiCache.get(key) ?? null
+  let aiSource: 'ai' | 'engine' = ai ? 'ai' : 'engine' // کش فقط حاوی نتایج موفق AI است
+  if (!ai) {
+    const digest = warAiDigest()
+    const result = await askAi(digest, buildAiPrompt(), 3200)
+    if (result) {
+      ai = normalizeAiReads(result)
+      aiSource = 'ai'
+      aiCache.set(key, ai)
+    }
+  }
+  if (!ai) ai = warFallbackAi()
+
+  // سینستری چارت‌های دلخواه با سه کنشگر اصلی — تا در تحلیل استفاده شوند
+  const customPairs = customMetasInUse().flatMap((m) => [
+    { a: m.id, b: 'iran', label: 'چارت دلخواه کاربر ↔ ایران' },
+    { a: m.id, b: 'israel', label: 'چارت دلخواه کاربر ↔ اسرائیل' },
+    { a: m.id, b: 'usa', label: 'چارت دلخواه کاربر ↔ آمریکا' },
+  ])
+
+  return {
+    generatedAtIso: new Date().toISOString(),
+    warIndex: agg.index,
+    entities: warEntitiesInUse().map((m) => getEntityChart(m.id)),
+    pairs: [...WAR_PAIRS.map((p) => getSynastry(p.a, p.b)), ...customPairs.map((p) => getSynastry(p.a, p.b))],
+    windows: agg.windows.slice(0, 60),
+    eclipses: agg.eclipses,
+    cycles40: await getCycles40(),
+    windowChart: getCycleWindowChart(),
+    ai,
+    aiSource,
+  }
+}
+
+// POST — دو حالت:
+//  mode:'full'  → پیلود کامل استرولوزی همراه چارت‌های دلخواه کاربر (customs) — فقط در RAM
+//  پیش‌فرض/ mode:'pair' → تحلیل عمیق جفتی دو چارت (customs هم برای پذیرش شناسه‌های دلخواه فرستاده می‌شود)
 export async function POST(req: Request) {
   try {
-    const body = (await req.json()) as { a?: string; b?: string }
+    const body = (await req.json().catch(() => ({}))) as {
+      mode?: 'full' | 'pair'
+      a?: string
+      b?: string
+      customs?: unknown
+    }
+    registerCustomMetas(body.customs ?? []) // چارت‌های دلخواه کاربر — فقط حافظه‌ی همین فرایند
+    registerCycle40Entity() // برای پذیرش شناسه چرخه ۴۰روزه
+    if (body.mode === 'full') {
+      return NextResponse.json({ ok: true, ...(await fullPayload()) })
+    }
     const a = body.a ?? 'iran'
     const b = body.b ?? 'israel'
-    await loadCustomMetas() // برای پذیرش شناسه چارت‌های دلخواه
-    registerCycle40Entity() // برای پذیرش شناسه چرخه ۴۰روزه
     const ma = entityMeta(a)
     const mb = entityMeta(b)
 

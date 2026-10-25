@@ -1,6 +1,6 @@
 // API چارت تولد — استرولوژی شخصی (غربی + ودیک + ستارگان ثابت + چرخه زندگی)
+// حریم خصوصی: هیچ چارتی ذخیره نمی‌شود — فقط محاسبه‌ی زنده در حافظه‌ی همین فرایند
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
 import { aiChatCompletion } from '@/lib/ai-gateway'
 import { resolveBirth } from '@/lib/jalali'
 import {
@@ -65,21 +65,6 @@ function starsText(stars: StarContact[]): string {
   return stars.map((s) => `${s.bodyFa} مقارن ${s.star} (${s.meaning})`).join('؛ ')
 }
 
-export async function GET() {
-  try {
-    const rows = await db.natalChart.findMany({
-      orderBy: { createdAt: 'desc' },
-      take: 24,
-    })
-    return NextResponse.json({ ok: true, charts: rows })
-  } catch (e) {
-    return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : 'خطای دیتابیس' },
-      { status: 500 },
-    )
-  }
-}
-
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as {
@@ -128,22 +113,7 @@ export async function POST(req: Request) {
       natalCache.set(key, natal)
     }
 
-    // ذخیره در دیتابیس (برای بازیابی بعدی)
-    let chartId = ''
-    try {
-      const saved = await db.natalChart.create({
-        data: {
-          name: (body.name ?? '').slice(0, 60),
-          jy, jm, jd, hour, minute,
-          city: body.city ?? 'تهران',
-        },
-      })
-      chartId = saved.id
-    } catch {
-      // جدول ممکن است روی سرور هنوز ساخته نشده باشد — محاسبه بدون ذخیره ادامه می‌یابد
-    }
-
-    // ─── تحلیل هوش مصنوعی (با کش) ───
+    // ─── تحلیل هوش مصنوعی (با کش) ─── // هیچ ذخیره‌ای انجام نمی‌شود (حریم خصوصی)
     let ai: Record<string, unknown> | null = (aiCache.get(key) as Record<string, unknown>) ?? null
     if (!ai) {
       const w = natal.western
@@ -222,7 +192,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      chartId,
       input: { jy, jm, jd, hour, minute, city: natal.city, name: body.name ?? '' },
       birthIso: natal.birthIso,
       western: natal.western,

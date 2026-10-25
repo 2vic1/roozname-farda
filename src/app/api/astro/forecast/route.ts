@@ -2,7 +2,6 @@
 // (تاریخ دقیق تعاملات با پنجره فعال ±۷ روز، قیاس‌های تاریخی سیارات بیرونی،
 //  ستارگان ثابت، گرفتگی‌ها، اطوار ماه + لایه شخصی روی چارت تولد)
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
 import { aiChatCompletion } from '@/lib/ai-gateway'
 import { resolveBirth } from '@/lib/jalali'
 import { computeNatalFull, computeMonthForecast, type NatalContext } from '@/lib/natal'
@@ -29,26 +28,9 @@ function extractJson(text: string): Record<string, unknown> | null {
 }
 
 async function loadContext(
-  chartId?: string,
   birth?: { jy: number; jm: number; jd: number; hour: number; minute: number; city: string },
 ): Promise<NatalContext | null> {
-  if (chartId) {
-    const cached = ctxCache.get(chartId)
-    if (cached) return cached
-    const row = await db.natalChart.findUnique({ where: { id: chartId } })
-    if (!row) return null
-    const resolved = resolveBirth({
-      jy: row.jy, jm: row.jm, jd: row.jd,
-      hour: row.hour, minute: row.minute, city: row.city,
-    })
-    const full = computeNatalFull(resolved.utc, resolved.lat, resolved.lon)
-    const ctx: NatalContext = {
-      birth: resolved.utc, lat: resolved.lat, lon: resolved.lon,
-      western: full.western, vedic: full.vedic, stars: full.stars, numerology: full.numerology,
-    }
-    ctxCache.set(chartId, ctx)
-    return ctx
-  }
+  // حریم خصوصی: فقط داده‌ی تولد inline که کلاینت همین حالا فرستاده — هیچ chartId/جدولی در کار نیست
   if (birth) {
     const key = `x-${birth.jy}-${birth.jm}-${birth.jd}-${birth.hour}-${birth.minute}-${birth.city}`
     const cached = ctxCache.get(key)
@@ -68,7 +50,6 @@ async function loadContext(
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as {
-      chartId?: string
       birth?: { jy: number; jm: number; jd: number; hour: number; minute: number; city: string }
       jy: number
       jm: number
@@ -78,10 +59,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: 'ماه یا سال نامعتبر است' }, { status: 400 })
     }
 
-    const hasChart = Boolean(body.chartId || body.birth)
-    const natal = hasChart ? await loadContext(body.chartId, body.birth) : null
+    const hasChart = Boolean(body.birth)
+    const natal = hasChart ? await loadContext(body.birth) : null
 
-    const fcKey = `${body.chartId ?? (body.birth ? `${body.birth.jy}-${body.birth.jm}-${body.birth.jd}-${body.birth.hour}-${body.birth.minute}-${body.birth.city}` : 'sky')}:${jy}:${jm}`
+    const fcKey = `${body.birth ? `${body.birth.jy}-${body.birth.jm}-${body.birth.jd}-${body.birth.hour}-${body.birth.minute}-${body.birth.city}` : 'sky'}:${jy}:${jm}`
     let fc = fcCache.get(fcKey)
     if (!fc) {
       fc = computeMonthForecast(jy, jm, natal)

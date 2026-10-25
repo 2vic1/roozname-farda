@@ -1,7 +1,7 @@
 'use client'
 
 // ─── استرولوژی جنگ — چارت دولت‌ها/رهبران + سینستری + پنجره‌های جنگی + پیشگویی ───
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -17,9 +17,28 @@ import {
 import { ZodiacWheel } from './wheel'
 import { CustomEntitiesCard } from './custom-entities'
 import { utcToJalaliTehran, jalaliMonthLabel } from '@/lib/jalali'
+import {
+  readCustomDefsFromSession, writeCustomDefsToSession, type CustomDefInput,
+} from '@/lib/custom-entity'
 import type {
   WarPayload, WarEntityChart, WarSynastry, WarWindow, WarAi,
 } from '@/lib/war-astro'
+
+/** دریافت پیلود کامل استرولوزی — چارت‌های دلخواه فقط همراه بدنه‌ی همین درخواست به RAM سرور می‌آیند */
+async function fetchWarFull(defs: CustomDefInput[]): Promise<WarPayload | null> {
+  try {
+    const r = await fetch('/api/astro/war', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'full', customs: defs }),
+      cache: 'no-store',
+    })
+    const j = await r.json() as WarPayload & { ok: boolean; error?: string }
+    return j.ok ? j : null
+  } catch {
+    return null
+  }
+}
 
 // ارقام فارسی برای هر رشته ترکیبی
 const faTxt = (s: string | number) => String(s).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)])
@@ -116,6 +135,8 @@ export function WarAstroSection() {
   const [data, setData] = useState<WarPayload | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [customDefs, setCustomDefs] = useState<CustomDefInput[]>(() => readCustomDefsFromSession())
+  const initialDefsRef = useRef(customDefs)
   const [selEntity, setSelEntity] = useState('iran')
   const [pairA, setPairA] = useState('iran')
   const [pairB, setPairB] = useState('israel')
@@ -124,47 +145,41 @@ export function WarAstroSection() {
   const [domain, setDomain] = useState<'all' | WarWindow['domain']>('all')
   const deepLoading = deepLoadedKey !== `${pairA}|${pairB}`
 
-  // دریافت/به‌روزرسانی داده — بعد از افزودن/حذف چارت دلخواه هم صدا زده می‌شود
-  const reload = useCallback(async () => {
-    try {
-      const r = await fetch('/api/astro/war', { cache: 'no-store' })
-      const j = await r.json()
-      if (j.ok) {
-        setData(j as WarPayload)
+  // افزودن/حذف چارت دلخواه — فقط حافظه‌ی تب + دریافت مجدد با تعریف‌های جدید
+  const applyDefs = useCallback((next: CustomDefInput[]) => {
+    setCustomDefs(next)
+    writeCustomDefsToSession(next)
+    void (async () => {
+      const j = await fetchWarFull(next)
+      if (j) {
+        setData(j)
         setError('')
       } else {
-        setError(j.error || 'خطای موتور استرولوزی جنگ')
+        setError('اتصال به موتور برقرار نشد')
       }
-    } catch {
-      setError('اتصال به موتور برقرار نشد')
-    }
+    })()
   }, [])
 
+  // بارگذاری اولیه — چارت‌های دلخواهِ همین تب (از lazy init) همراه درخواست می‌روند
   useEffect(() => {
     let alive = true
     ;(async () => {
-      try {
-        const r = await fetch('/api/astro/war', { cache: 'no-store' })
-        const j = await r.json()
-        if (!alive) return
-        if (j.ok) {
-          setData(j as WarPayload)
-          setError('')
-        } else {
-          setError(j.error || 'خطای موتور استرولوزی جنگ')
-        }
-      } catch {
-        if (alive) setError('اتصال به موتور برقرار نشد')
-      } finally {
-        if (alive) setLoading(false)
+      const j = await fetchWarFull(initialDefsRef.current)
+      if (!alive) return
+      if (j) {
+        setData(j)
+        setError('')
+      } else {
+        setError('اتصال به موتور برقرار نشد')
       }
+      setLoading(false)
     })()
     return () => {
       alive = false
     }
   }, [])
 
-  // تحلیل عمیق جفتی — هنگام تغییر جفت
+  // تحلیل عمیق جفتی — هنگام تغییر جفت (تعریف‌های دلخواه هم برای پذیرش شناسه می‌روند)
   const pairKey = `${pairA}|${pairB}`
   useEffect(() => {
     if (!data) return
@@ -172,7 +187,7 @@ export function WarAstroSection() {
     fetch('/api/astro/war', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ a: pairA, b: pairB }),
+      body: JSON.stringify({ a: pairA, b: pairB, customs: customDefs }),
     })
       .then((r) => r.json())
       .then((j) => {
@@ -186,7 +201,7 @@ export function WarAstroSection() {
         setDeepLoadedKey(pairKey)
       })
     return () => { alive = false }
-  }, [pairKey, data, pairA, pairB])
+  }, [pairKey, data, pairA, pairB, customDefs])
 
   const entity = data?.entities.find((e) => e.meta.id === selEntity)
   const pairBase = data?.pairs.find(
@@ -356,7 +371,7 @@ export function WarAstroSection() {
       )}
 
       {/* ═══ افراد و دولت‌های انتخابی — چارت دلخواه کاربر ═══ */}
-      <CustomEntitiesCard customs={data.entities.filter((e) => e.meta.id.startsWith('custom:'))} onChanged={reload} />
+      <CustomEntitiesCard defs={customDefs} onChange={applyDefs} />
 
       {/* ═══ چارت‌های پایه ═══ */}
       <div>

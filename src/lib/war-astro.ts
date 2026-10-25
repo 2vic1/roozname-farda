@@ -3,7 +3,7 @@
 // چارت‌ها بر پایه داده‌های شناخته‌شده استرولوژی جهانی (Rodden-rated برای افراد،
 // چارت سیبلی برای آمریکا، لحظه اعلام جمهوری اسلامی برای ایران، اعلام استقلال برای اسرائیل).
 import * as A from 'astronomy-engine'
-import { db } from '@/lib/db'
+import { customDefKey, sanitizeCustomDefs, tehranWallToUtc, type CustomDefInput } from './custom-entity'
 import { WAR_12_END, WINDOW_40 } from './cycles'
 import { tehranDateStr } from './tehran'
 import {
@@ -190,42 +190,48 @@ export function entityMeta(id: string): WarEntityMeta {
 // ═══ چارت‌های دلخواه کاربر (افراد/دولت‌های انتخابی) ═══
 
 const customRegistry = new Map<string, WarEntityMeta>()
+let customSignature = ''
 
-/** خواندن چارت‌های دلخواه کاربر از دیتابیس و ثبت در رجیستری — قبل از هر محاسبه‌ای صدا زده می‌شود */
-export async function loadCustomMetas(): Promise<WarEntityMeta[]> {
-  try {
-    const rows = await db.customEntity.findMany({ orderBy: { createdAt: 'asc' }, take: 8 })
-    const metas: WarEntityMeta[] = rows.map((r) => {
-      const d = new Date(r.isoUtc)
-      const j = utcToJalaliTehran(d)
-      const hhmm = new Intl.DateTimeFormat('en-GB', {
-        timeZone: 'Asia/Tehran', hour: '2-digit', minute: '2-digit', hour12: false,
-      }).format(d)
-      return {
-        id: `custom:${r.id}`,
-        fa: r.name,
-        short: r.name.length > 16 ? r.name.slice(0, 16) + '…' : r.name,
-        flag: r.kind === 'state' ? '🏛️' : '👤',
-        kind: r.kind === 'state' ? 'state' : 'leader',
-        isoUtc: d.toISOString(),
-        lat: r.lat,
-        lon: r.lon,
-        placeFa: r.placeFa,
-        chartFa: `${faNum(j.jd)} ${jalaliMonthLabel(j.jy, j.jm).split(' ')[0]} ${faNum(j.jy)} — ساعت ${faNum(hhmm)} محل (${r.placeFa})`,
-        sourceNote: 'چارت دلخواه افزوده‌شده توسط کاربر — با همان موتور دقیق ephemeris محاسبه می‌شود',
-        hotRole: 'چارت انتخابی کاربر — در سینستری، پنجره‌ها و تحلیل AI فعال',
-      }
-    })
-    customRegistry.clear()
-    for (const m of metas) customRegistry.set(m.id, m)
-    // کش چارت‌های سفارشی قدیمی را خالی کن (ممکن است تغییر کرده باشند)
-    for (const key of [...chartCache.keys()]) {
-      if (key.startsWith('custom:')) chartCache.delete(key)
+/** ثبت چارت‌های دلخواه کاربر که کلاینت همراه درخواست می‌فرستد — فقط در حافظه‌ی همین فرایند؛
+ * هیچ جدول یا فایلی نوشته نمی‌شود (حریم خصوصی). قبل از هر محاسبه‌ای صدا زده می‌شود. */
+export function registerCustomMetas(raw: unknown): void {
+  const defs: CustomDefInput[] = sanitizeCustomDefs(raw)
+  const metas: WarEntityMeta[] = defs.map((def) => {
+    const d = tehranWallToUtc(def.date, def.time)
+    const j = utcToJalaliTehran(d)
+    const hhmm = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Tehran', hour: '2-digit', minute: '2-digit', hour12: false,
+    }).format(d)
+    return {
+      id: customDefKey(def),
+      fa: def.name,
+      short: def.name.length > 16 ? def.name.slice(0, 16) + '…' : def.name,
+      flag: def.kind === 'state' ? '🏛️' : '👤',
+      kind: def.kind === 'state' ? 'state' : 'leader',
+      isoUtc: d.toISOString(),
+      lat: def.lat,
+      lon: def.lon,
+      placeFa: def.placeFa,
+      chartFa: `${faNum(j.jd)} ${jalaliMonthLabel(j.jy, j.jm).split(' ')[0]} ${faNum(j.jy)} — ساعت ${faNum(hhmm)} محل (${def.placeFa})`,
+      sourceNote: 'چارت دلخواه کاربر — فقط برای همین محاسبه در حافظه می‌ماند و ذخیره نمی‌شود (حریم خصوصی)',
+      hotRole: 'چارت انتخابی کاربر — در سینستری، پنجره‌ها و تحلیل AI فعال',
     }
-    return metas
-  } catch {
-    return []
+  })
+  // تغییر ست دلخواه‌ها ⇒ کش‌های حافظه‌ی مرتبط باطل شود (تغییر تعریف/حذف)
+  const sig = metas.map((m) => `${m.id}@${m.isoUtc}`).join('|')
+  if (sig !== customSignature) {
+    const ids = new Set(metas.map((m) => m.id))
+    for (const key of [...chartCache.keys()]) {
+      if (key.startsWith('custom:') && !ids.has(key)) chartCache.delete(key)
+    }
+    for (const key of [...synastryCache.keys()]) {
+      if (key.includes('custom:')) synastryCache.delete(key)
+    }
+    dayCache.clear()
+    customSignature = sig
   }
+  customRegistry.clear()
+  for (const m of metas) customRegistry.set(m.id, m)
 }
 
 export function customMetasInUse(): WarEntityMeta[] {

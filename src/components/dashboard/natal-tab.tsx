@@ -7,7 +7,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { CircleAlert, Compass, Globe, Heart, Sparkles, Star, User, Wallet, Loader2, Swords } from 'lucide-react'
+import { CircleAlert, Compass, Globe, Heart, ShieldCheck, Sparkles, Star, User, Wallet, Loader2, Swords, X } from 'lucide-react'
 import { CITIES, JALALI_MONTHS_FA, faYear } from '@/lib/jalali'
 import { faNum } from './types'
 import { ZodiacWheel } from './natal/wheel'
@@ -34,7 +34,6 @@ interface NatalAi {
 }
 interface NatalResponse {
   ok: boolean
-  chartId?: string
   error?: string
   input: { jy: number; jm: number; jd: number; hour: number; minute: number; city: string; name: string }
   western: WesternChart
@@ -46,7 +45,6 @@ interface NatalResponse {
   ai: NatalAi
 }
 interface SavedChart {
-  id: string
   name: string
   jy: number
   jm: number
@@ -54,6 +52,42 @@ interface SavedChart {
   hour: number
   minute: number
   city: string
+}
+
+// ─── حریم خصوصی: چارت‌های تحلیل‌شده فقط در حافظه‌ی همین تب مرورگر (sessionStorage) ───
+// نه روی سرور، نه در دیتابیس — با بستن تب کاملاً پاک می‌شوند.
+const MAX_SAVED_NATAL = 24
+const SAVED_NATAL_KEY = 'natalSavedCharts.v1'
+
+function savedNatalKey(c: SavedChart): string {
+  return `${c.jy}-${c.jm}-${c.jd}-${c.hour}-${c.minute}-${c.city}`
+}
+
+function readSavedNatal(): SavedChart[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw: unknown = JSON.parse(sessionStorage.getItem(SAVED_NATAL_KEY) ?? '[]')
+    if (!Array.isArray(raw)) return []
+    return raw
+      .filter((r): r is SavedChart =>
+        !!r && typeof r === 'object' &&
+        typeof (r as SavedChart).name === 'string' &&
+        Number.isFinite((r as SavedChart).jy) && Number.isFinite((r as SavedChart).jm) &&
+        Number.isFinite((r as SavedChart).jd) && Number.isFinite((r as SavedChart).hour) &&
+        Number.isFinite((r as SavedChart).minute) && typeof (r as SavedChart).city === 'string')
+      .slice(0, MAX_SAVED_NATAL)
+  } catch {
+    return []
+  }
+}
+
+function writeSavedNatal(list: SavedChart[]): void {
+  if (typeof window === 'undefined') return
+  try {
+    sessionStorage.setItem(SAVED_NATAL_KEY, JSON.stringify(list.slice(0, MAX_SAVED_NATAL)))
+  } catch {
+    // حافظه در دسترس نیست (حالت خصوصی مرورگر) — بی‌خطر
+  }
 }
 
 function scoreColor(score: number): string {
@@ -88,19 +122,10 @@ export function NatalTab() {
   const [mode, setMode] = useState<'war' | 'personal'>('war')
   const resultRef = useRef<HTMLDivElement>(null)
 
-  const loadSaved = useCallback(async () => {
-    try {
-      const res = await fetch('/api/astro/natal', { cache: 'no-store' })
-      const j = (await res.json()) as { ok: boolean; charts?: SavedChart[] }
-      if (j.ok && j.charts) setSaved(j.charts)
-    } catch {
-      // بی‌خطر
-    }
-  }, [])
-
+  // بازیابی چارت‌های این تب از حافظه‌ی مرورگر — نه از سرور (حریم خصوصی)
   useEffect(() => {
-    void loadSaved()
-  }, [loadSaved])
+    setSaved(readSavedNatal())
+  }, [])
 
   const compute = useCallback(async (input: typeof form) => {
     setLoading(true)
@@ -114,7 +139,17 @@ export function NatalTab() {
       const j = (await res.json()) as NatalResponse
       if (j.ok) {
         setResult(j)
-        void loadSaved()
+        // هیچ ذخیره‌ای روی سرور انجام نمی‌شود — فقط فهرست همین تب در حافظه‌ی مرورگر
+        const entry: SavedChart = {
+          name: (input.name ?? '').slice(0, 60),
+          jy: input.jy, jm: input.jm, jd: input.jd,
+          hour: input.hour, minute: input.minute, city: input.city,
+        }
+        setSaved((prev) => {
+          const next = [entry, ...prev.filter((p) => savedNatalKey(p) !== savedNatalKey(entry))].slice(0, MAX_SAVED_NATAL)
+          writeSavedNatal(next)
+          return next
+        })
         setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120)
       } else {
         setError(j.error ?? 'خطا در محاسبه چارت')
@@ -124,7 +159,15 @@ export function NatalTab() {
     } finally {
       setLoading(false)
     }
-  }, [loadSaved])
+  }, [])
+
+  const removeSaved = useCallback((c: SavedChart) => {
+    setSaved((prev) => {
+      const next = prev.filter((p) => savedNatalKey(p) !== savedNatalKey(c))
+      writeSavedNatal(next)
+      return next
+    })
+  }, [])
 
   const loadSavedChart = useCallback((c: SavedChart) => {
     compute({ name: c.name, jy: c.jy, jm: c.jm, jd: c.jd, hour: c.hour, minute: c.minute, city: c.city })
@@ -281,15 +324,26 @@ export function NatalTab() {
             </Button>
             {saved.length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-[10px] text-zinc-500">چارت‌های ذخیره:</span>
+                <span className="text-[10px] text-zinc-500">چارت‌های این تب (ذخیره نمی‌شوند):</span>
                 {saved.slice(0, 8).map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => loadSavedChart(c)}
-                    className="rounded-full border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-[10px] text-zinc-300 transition hover:border-violet-500 hover:text-violet-300"
+                  <span
+                    key={savedNatalKey(c)}
+                    className="relative inline-flex items-center rounded-full border border-zinc-700 bg-zinc-900 text-[10px] text-zinc-300 transition hover:border-violet-500 hover:text-violet-300"
                   >
-                    {c.name || `${faNum(c.jd)} ${JALALI_MONTHS_FA[c.jm - 1]} ${faYear(c.jy)}`}
-                  </button>
+                    <button
+                      onClick={() => loadSavedChart(c)}
+                      className="py-1 pr-2.5 pl-6"
+                    >
+                      {c.name || `${faNum(c.jd)} ${JALALI_MONTHS_FA[c.jm - 1]} ${faYear(c.jy)}`}
+                    </button>
+                    <button
+                      onClick={() => removeSaved(c)}
+                      aria-label="حذف از فهرست این تب"
+                      className="absolute left-1 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-zinc-500 transition hover:bg-zinc-700 hover:text-zinc-200"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
                 ))}
               </div>
             )}
@@ -302,6 +356,14 @@ export function NatalTab() {
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
+
+          <p className="mt-3 flex items-start gap-1.5 rounded-lg border border-violet-500/20 bg-violet-500/5 px-2.5 py-2 text-[10px] leading-4 text-violet-200/80">
+            <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-violet-400" />
+            <span>
+              <b className="text-violet-300">حریم خصوصی:</b> چارت‌های شما هیچ‌جا ذخیره نمی‌شوند — نه روی سرور، نه در دیتابیس.
+              فهرست «چارت‌های این تب» فقط در حافظه‌ی مرورگر شماست و با بستن تب کاملاً پاک می‌شود.
+            </span>
+          </p>
         </CardContent>
       </Card>
 
@@ -606,7 +668,6 @@ export function NatalTab() {
 
             {/* پیش‌بینی ماهانه شخصی */}
             <ForecastPanel
-              chartId={result.chartId || undefined}
               birth={{
                 jy: result.input.jy, jm: result.input.jm, jd: result.input.jd,
                 hour: result.input.hour, minute: result.input.minute, city: result.input.city,

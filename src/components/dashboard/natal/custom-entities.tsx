@@ -1,9 +1,11 @@
 'use client'
 
 // ─── افراد/دولت‌های انتخابی — چارت دلخواه کاربر با تاریخ و ساعت دقیق تولد ───
-// چارت افزوده‌شده با همان موتور دقیق ephemeris محاسبه و در سینستری، پنجره‌ها و تحلیل AI استفاده می‌شود
+// حریم خصوصی: چارت‌ها فقط در حافظه‌ی همین تب مرورگر (sessionStorage) نگه داشته می‌شوند؛
+// نه روی سرور، نه در دیتابیس — فقط همراه درخواست محاسبه به RAM سرور می‌آیند و با بستن تب پاک می‌شوند.
 import { useState } from 'react'
 import { toast } from 'sonner'
+import { ShieldCheck, UserPlus, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -11,9 +13,8 @@ import { Input } from '@/components/ui/input'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import { Loader2, UserPlus, X } from 'lucide-react'
+import { customDefKey, MAX_CUSTOMS, type CustomDefInput } from '@/lib/custom-entity'
 import { utcToJalaliTehran, jalaliMonthLabel } from '@/lib/jalali'
-import type { WarEntityChart } from '@/lib/war-astro'
 
 const faTxt = (s: string | number) => String(s).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)])
 
@@ -38,19 +39,29 @@ export const CITIES = [
   { fa: 'آنکارا', lat: 39.9334, lon: 32.8597 },
 ]
 
+/** برچسب نمایشی یک تعریف — نام (یا تاریخ جلالی اگر نامی نداده باشد) */
+export function customDefLabel(def: CustomDefInput): string {
+  if (def.name.trim()) return def.name.trim()
+  try {
+    const j = utcToJalaliTehran(new Date(def.date + 'T00:00:00Z'))
+    return `${faTxt(j.jd)} ${jalaliMonthLabel(j.jy, j.jm).split(' ')[0]} ${faTxt(j.jy)}`
+  } catch {
+    return def.date
+  }
+}
+
 export function CustomEntitiesCard({
-  customs,
-  onChanged,
+  defs,
+  onChange,
 }: {
-  customs: WarEntityChart[]
-  onChanged: () => void
+  defs: CustomDefInput[]
+  onChange: (next: CustomDefInput[]) => void
 }) {
   const [name, setName] = useState('')
   const [kind, setKind] = useState<'person' | 'state'>('person')
   const [date, setDate] = useState('')
   const [time, setTime] = useState('')
   const [cityIdx, setCityIdx] = useState('0')
-  const [busy, setBusy] = useState(false)
 
   const city = CITIES[Number(cityIdx)] ?? CITIES[0]
   // پیش‌نمایش جلالی تاریخ انتخابی (تقویمی — بدون لحظه)
@@ -65,8 +76,9 @@ export function CustomEntitiesCard({
       })()
     : ''
 
-  const add = async () => {
-    if (!name.trim() || name.trim().length < 2) {
+  const add = () => {
+    const trimmed = name.trim()
+    if (trimmed.length < 2) {
       toast.error('نام را وارد کنید (حداقل ۲ نویسه)')
       return
     }
@@ -74,51 +86,36 @@ export function CustomEntitiesCard({
       toast.error('تاریخ تولد/تأسیس را وارد کنید')
       return
     }
-    setBusy(true)
-    try {
-      const r = await fetch('/api/astro/custom', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          name: name.trim(),
-          kind,
-          date,
-          time: time || '12:00',
-          lat: city.lat,
-          lon: city.lon,
-          placeFa: city.fa,
-        }),
-      })
-      const j = await r.json() as { ok: boolean; error?: string }
-      if (!j.ok) {
-        toast.error('افزودن ناموفق', { description: j.error })
-        return
-      }
-      toast.success('چارت افزوده شد', {
-        description: `${name.trim()} (${city.fa}${time ? `، ${time}` : '، ظهر'}) — در سینستری، پنجره‌ها و تحلیل هوش مصنوعی فعال است`,
-      })
-      setName('')
-      setDate('')
-      setTime('')
-      onChanged()
-    } catch {
-      toast.error('خطای شبکه در افزودن چارت')
-    } finally {
-      setBusy(false)
+    const def: CustomDefInput = {
+      name: trimmed,
+      kind,
+      date,
+      time: /^\d{2}:\d{2}$/.test(time) ? time : '12:00',
+      lat: city.lat,
+      lon: city.lon,
+      placeFa: city.fa,
     }
+    const key = customDefKey(def)
+    if (defs.some((d) => customDefKey(d) === key)) {
+      toast.info('این چارت قبلاً افزوده شده — دوباره اضافه نمی‌شود')
+      return
+    }
+    if (defs.length >= MAX_CUSTOMS) {
+      toast.error(`حداکثر ${faTxt(MAX_CUSTOMS)} چارت دلخواه می‌توان افزود — ابتدا یکی را حذف کنید`)
+      return
+    }
+    onChange([...defs, def])
+    toast.success('چارت به تحلیل فعال شد', {
+      description: `${trimmed} (${city.fa}${def.time !== '12:00' ? `، ${time}` : '، ظهر'}) — در سینستری، پنجره‌ها و تحلیل هوش مصنوعی فعال است · هیچ‌جا ذخیره نمی‌شود`,
+    })
+    setName('')
+    setDate('')
+    setTime('')
   }
 
-  const remove = async (id: string, label: string) => {
-    setBusy(true)
-    try {
-      await fetch(`/api/astro/custom?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
-      toast.success('چارت حذف شد', { description: label })
-      onChanged()
-    } catch {
-      toast.error('خطای شبکه در حذف چارت')
-    } finally {
-      setBusy(false)
-    }
+  const remove = (key: string, label: string) => {
+    onChange(defs.filter((d) => customDefKey(d) !== key))
+    toast.success('چارت از تحلیل حذف شد', { description: label })
   }
 
   return (
@@ -130,29 +127,31 @@ export function CustomEntitiesCard({
             افراد و دولت‌های انتخابی — چارت دلخواه شما
           </h3>
           <Badge variant="outline" className="border-zinc-700 text-[9px] text-zinc-500">
-            {faTxt(customs.length)} از ۸ — در تحلیل فعال
+            {faTxt(defs.length)} از {faTxt(MAX_CUSTOMS)} — در تحلیل فعال
           </Badge>
         </div>
 
-        {customs.length > 0 && (
+        {defs.length > 0 && (
           <div className="mb-3 flex flex-wrap gap-1.5">
-            {customs.map((c) => (
-              <Badge
-                key={c.meta.id}
-                variant="outline"
-                className="gap-1.5 border-teal-500/30 bg-teal-500/5 py-1 pl-1 text-[10px] text-teal-200"
-              >
-                {c.meta.flag} {faTxt(c.meta.fa)} — {faTxt(c.meta.chartFa.split('—')[0])}
-                <button
-                  onClick={() => remove(c.meta.id.slice('custom:'.length), c.meta.fa)}
-                  disabled={busy}
-                  aria-label={`حذف چارت ${c.meta.fa}`}
-                  className="rounded-full p-0.5 text-teal-300/70 transition hover:bg-teal-500/20 hover:text-teal-100"
+            {defs.map((d) => {
+              const key = customDefKey(d)
+              return (
+                <Badge
+                  key={key}
+                  variant="outline"
+                  className="gap-1.5 border-teal-500/30 bg-teal-500/5 py-1 pl-1 text-[10px] text-teal-200"
                 >
-                  <X className="h-3 w-3" />
-                </button>
-              </Badge>
-            ))}
+                  {d.kind === 'state' ? '🏛️' : '👤'} {faTxt(customDefLabel(d))} — {faTxt(d.date)}
+                  <button
+                    onClick={() => remove(key, customDefLabel(d))}
+                    aria-label={`حذف چارت ${customDefLabel(d)}`}
+                    className="rounded-full p-0.5 text-teal-300/70 transition hover:bg-teal-500/20 hover:text-teal-100"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              )
+            })}
           </div>
         )}
 
@@ -222,11 +221,19 @@ export function CustomEntitiesCard({
             {time ? `ساعت ${time}` : 'ساعت ندادید — ظهر فرض می‌شود'} · مکان: {city.fa}
             {' '}({city.lat.toFixed(2)}, {city.lon.toFixed(2)}) · آفست تاریخی تهران (DST) خودکار اعمال می‌شود
           </p>
-          <Button size="sm" className="h-8 gap-1.5" onClick={add} disabled={busy}>
-            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
+          <Button size="sm" className="h-8 gap-1.5" onClick={add}>
+            <UserPlus className="h-3.5 w-3.5" />
             افزودن چارت به تحلیل
           </Button>
         </div>
+
+        <p className="mt-3 flex items-start gap-1.5 rounded-lg border border-teal-500/20 bg-teal-500/5 px-2.5 py-2 text-[10px] leading-4 text-teal-200/80">
+          <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-teal-400" />
+          <span>
+            <b className="text-teal-300">حریم خصوصی:</b> این چارت‌ها هیچ‌جا ذخیره نمی‌شوند — نه روی سرور، نه در دیتابیس.
+            فقط در حافظه‌ی همین تب مرورگر شما می‌مانند و با بستن تب کاملاً پاک می‌شوند.
+          </span>
+        </p>
       </CardContent>
     </Card>
   )

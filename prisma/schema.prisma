@@ -180,19 +180,6 @@ model BotRun {
   @@index([bot, createdAt])
 }
 
-// ─── چارت‌های تولد ذخیره‌شده (استرولوژی شخصی) ───
-model NatalChart {
-  id        String   @id @default(cuid())
-  name      String   @default("")
-  jy        Int // سال تولد جلالی
-  jm        Int // ماه تولد جلالی 1-12
-  jd        Int // روز تولد جلالی
-  hour      Int // ساعت قانونی محلی 0-23
-  minute    Int
-  city      String // نام شهر از فهرست
-  createdAt DateTime @default(now())
-}
-
 // ─── تماس‌های کلیدی پیش‌بینی ۳۰روزه بازار (برای دقت‌سنجی بعدی) ───
 model MarketForecast {
   id         String   @id @default(cuid())
@@ -221,16 +208,4 @@ model MarketForecastPath {
 
   @@unique([symbol, method, runDate])
   @@index([symbol, runDate])
-}
-
-// ─── چارت‌های دلخواه کاربر (افراد/دولت‌های انتخابی) — وارد استرولوزی جنگ و تحلیل می‌شوند ───
-model CustomEntity {
-  id        String   @id @default(cuid())
-  name      String   // نام نمایشی فارسی
-  kind      String   @default("person") // state | person
-  isoUtc    DateTime // لحظه تولد/تأسیس به UTC
-  lat       Float
-  lon       Float
-  placeFa   String   @default("تهران")
-  createdAt DateTime @default(now())
 }
