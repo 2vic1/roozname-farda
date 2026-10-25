@@ -15,6 +15,7 @@ import {
   Loader2, Crown, Landmark, Flame, Coins, Eye, ScrollText, Gauge, Timer,
 } from 'lucide-react'
 import { ZodiacWheel } from './wheel'
+import { CustomEntitiesCard } from './custom-entities'
 import { utcToJalaliTehran, jalaliMonthLabel } from '@/lib/jalali'
 import type {
   WarPayload, WarEntityChart, WarSynastry, WarWindow, WarAi,
@@ -123,18 +124,44 @@ export function WarAstroSection() {
   const [domain, setDomain] = useState<'all' | WarWindow['domain']>('all')
   const deepLoading = deepLoadedKey !== `${pairA}|${pairB}`
 
+  // دریافت/به‌روزرسانی داده — بعد از افزودن/حذف چارت دلخواه هم صدا زده می‌شود
+  const reload = useCallback(async () => {
+    try {
+      const r = await fetch('/api/astro/war', { cache: 'no-store' })
+      const j = await r.json()
+      if (j.ok) {
+        setData(j as WarPayload)
+        setError('')
+      } else {
+        setError(j.error || 'خطای موتور استرولوزی جنگ')
+      }
+    } catch {
+      setError('اتصال به موتور برقرار نشد')
+    }
+  }, [])
+
   useEffect(() => {
     let alive = true
-    fetch('/api/astro/war')
-      .then((r) => r.json())
-      .then((j) => {
+    ;(async () => {
+      try {
+        const r = await fetch('/api/astro/war', { cache: 'no-store' })
+        const j = await r.json()
         if (!alive) return
-        if (j.ok) setData(j as WarPayload)
-        else setError(j.error || 'خطای موتور استرولوزی جنگ')
-      })
-      .catch(() => alive && setError('اتصال به موتور برقرار نشد'))
-      .finally(() => alive && setLoading(false))
-    return () => { alive = false }
+        if (j.ok) {
+          setData(j as WarPayload)
+          setError('')
+        } else {
+          setError(j.error || 'خطای موتور استرولوزی جنگ')
+        }
+      } catch {
+        if (alive) setError('اتصال به موتور برقرار نشد')
+      } finally {
+        if (alive) setLoading(false)
+      }
+    })()
+    return () => {
+      alive = false
+    }
   }, [])
 
   // تحلیل عمیق جفتی — هنگام تغییر جفت
@@ -170,7 +197,15 @@ export function WarAstroSection() {
     return domain === 'all' ? data.windows : data.windows.filter((w) => w.domain === domain)
   }, [data, domain])
   const aiReadFor = useCallback(
-    (id: string) => data?.ai?.reads?.find((r) => r.id === id)?.read ?? '',
+    (id: string) => {
+      const reads = data?.ai?.reads ?? []
+      const exact = reads.find((r) => r.id === id)?.read ?? ''
+      if (exact) return exact
+      // تطبیق احتیاطی با نام چارت — وقتی مدل شناسه را کامل تکرار نکرده
+      const e = data?.entities.find((x) => x.meta.id === id)
+      if (!e) return ''
+      return reads.find((r) => r.id === e.meta.fa || r.id === e.meta.short)?.read ?? ''
+    },
     [data],
   )
 
@@ -234,37 +269,71 @@ export function WarAstroSection() {
         </CardContent>
       </Card>
 
-      {/* ═══ چرخه‌های ۴۰روزه — شواهد عددی مدل ═══ */}
+      {/* ═══ چرخه‌های ۴۰روزه + چارت پنجره — شواهد عددی و آسمان پنجره ═══ */}
       {data.cycles40.length > 0 && (
         <Card className="border-amber-900/40 bg-amber-950/10">
-          <CardContent className="flex flex-col gap-2.5 p-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <Timer className="h-4 w-4 text-amber-400" />
-              <p className="text-xs font-bold text-amber-300">چرخه‌های ۴۰روزه از آتش‌بس — شواهد عددی مدل</p>
-              <Badge variant="outline" className="border-zinc-700 text-[9px] text-zinc-500">گن + هرست</Badge>
-            </div>
-            <p className="text-[11px] leading-5 text-zinc-400">
-              «جنگ ۴۰روزه» چارت جداگانه ندارد — چارت رویداد واقعی، جنگ ۱۲روزه است (۲۳ خرداد ۱۴۰۴، ساعت ۰۲:۳۰ تهران).
-              عدد ۴۰ یک چرخه زمانی گن/هرست از آتش‌بس ۳ تیر ۱۴۰۴ است و مستقیماً در امتیاز چرخه ریسک
-              و انتخاب سناریوهای روز حمله به‌کار می‌رود:
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {data.cycles40.map((c) => (
-                <Badge
-                  key={c.date}
-                  variant="outline"
-                  className="gap-1 border-amber-500/30 bg-amber-500/5 text-[10px] text-amber-200"
-                >
-                  <Timer className="h-3 w-3" />
-                  {faTxt(c.k)}×۴۰ · {faJDate(c.date)}
-                  {c.daysLeft > 0 ? ` · ${faTxt(c.daysLeft)} روز دیگر` : ' · امروز'}
-                  {c.families.includes('gann') && c.families.includes('hurst') ? ' · گن+هرست' : ''}
-                </Badge>
-              ))}
+          <CardContent className="p-4">
+            <div className="grid gap-5 lg:grid-cols-2">
+              <div className="space-y-2.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Timer className="h-4 w-4 text-amber-400" />
+                  <p className="text-xs font-bold text-amber-300">چرخه‌های ۴۰روزه از آتش‌بس — شواهد عددی مدل</p>
+                  <Badge variant="outline" className="border-zinc-700 text-[9px] text-zinc-500">گن + هرست</Badge>
+                </div>
+                <p className="text-[11px] leading-5 text-zinc-400">
+                  «جنگ ۴۰روزه» یک جنگ تاریخی نیست — عدد ۴۰ یک چرخه زمانی گن/هرست از آتش‌بس ۳ تیر ۱۴۰۴ است
+                  و مستقیماً در امتیاز چرخه ریسک و انتخاب سناریوهای روز حمله به‌کار می‌رود. چارت رویداد واقعی، جنگ ۱۲روزه است (۲۳ خرداد ۱۴۰۴):
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {data.cycles40.map((c) => (
+                    <Badge
+                      key={c.date}
+                      variant="outline"
+                      className="gap-1 border-amber-500/30 bg-amber-500/5 text-[10px] text-amber-200"
+                    >
+                      <Timer className="h-3 w-3" />
+                      {faTxt(c.k)}×۴۰ · {faJDate(c.date)}
+                      {c.daysLeft > 0 ? ` · ${faTxt(c.daysLeft)} روز دیگر` : ' · امروز'}
+                      {c.families.includes('gann') && c.families.includes('hurst') ? ' · گن+هرست' : ''}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+              {data.windowChart && (
+                <div>
+                  <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-amber-300">
+                    <CalendarClock className="h-4 w-4 text-amber-400" />
+                    چارت پنجره ۴۰روزه بعدی — آسمان {faJDate(data.windowChart.date)} ({faTxt(data.windowChart.k)}×۴۰) بر تهران
+                  </p>
+                  <div className="flex items-start gap-3">
+                    <div className="w-40 shrink-0 sm:w-48">
+                      <ZodiacWheel western={data.windowChart.western} />
+                      <p className="mt-1 text-center text-[9px] text-zinc-600">ظهر روز پنجره — چارت انتخابی</p>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="mb-1 text-[10px] font-bold text-zinc-400">جنبه‌های سخت به چارت‌های لنگر (جنگ ۱۲روزه/ایران/اسرائیل):</p>
+                      {data.windowChart.aspects.slice(0, 7).map((a, i) => (
+                        <p key={i} className="text-[10px] leading-4 text-zinc-400">
+                          • <b className="text-orange-300">{faTxt(a.transitFa)}</b> {faTxt(a.aspectFa)}{' '}
+                          <b className="text-zinc-100">{faTxt(a.targetFa)}</b>
+                          <span className="text-zinc-500"> «{faTxt(a.entityFa)}»</span>
+                          <span className="text-zinc-600"> ({faTxt(a.orb)}°)</span>
+                        </p>
+                      ))}
+                      {data.windowChart.aspects.length === 0 && (
+                        <p className="text-[10px] text-zinc-600">جنبه سخت مهمی در این پنجره به چارت‌های لنگر نیست</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
       )}
+
+      {/* ═══ افراد و دولت‌های انتخابی — چارت دلخواه کاربر ═══ */}
+      <CustomEntitiesCard customs={data.entities.filter((e) => e.meta.id.startsWith('custom:'))} onChanged={reload} />
 
       {/* ═══ چارت‌های پایه ═══ */}
       <div>

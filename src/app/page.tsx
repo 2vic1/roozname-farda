@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import { AutoRefreshBadge } from '@/components/dashboard/auto-refresh-badge'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -61,7 +62,6 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
-  const [countdown, setCountdown] = useState(REFRESH_SECONDS)
   const [todayFa, setTodayFa] = useState('')
   const [clock, setClock] = useState('')
   const refreshingRef = useRef(false)
@@ -89,19 +89,12 @@ export default function Home() {
     load()
   }, [load])
 
-  // شمارش معکوس رفرش خودکار — هر ۶۰ ثانیه داده تازه می‌شود
-  useEffect(() => {
-    const t = setInterval(() => setCountdown((c) => c - 1), 1000)
-    return () => clearInterval(t)
-  }, [])
-  useEffect(() => {
-    if (countdown > 0) return
-    setCountdown(REFRESH_SECONDS)
-    // تیک سبک: قیمت‌های لحظه‌ای + چرخش منابع خبری + بروزرسانی ریسک
-    const tick = fetch('/api/tick', { cache: 'no-store' }).catch(() => {})
+  // شمارش معکوس + تیک خودکار — داخل AutoRefreshBadge ایزوله شده تا درخت کل صفحه هر ثانیه رندر نشود
+  const handleAutoRefresh = useCallback(() => {
     load() // بروزرسانی فوری (احتمالاً داده قبلی)
-    void tick.then(() => load()) // بعد از تمام‌شدن تیک — داده واقعاً تازه
-  }, [countdown, load])
+    // تیک واقعی داخل خود بج زده می‌شود؛ بعد از آن داده تازه را می‌گیریم
+    void Promise.resolve().then(() => load())
+  }, [load])
 
   // ساعت و تاریخ تهران — فقط سمت کلاینت تا hydration mismatch نداشته باشیم
   useEffect(() => {
@@ -137,7 +130,6 @@ export default function Home() {
     try {
       await fetch('/api/bots/run?force=1', { cache: 'no-store' })
       await load()
-      setCountdown(REFRESH_SECONDS)
       toast.success('داده‌ها بروزرسانی شد', { description: 'بات‌ها اجرا و نتایج ذخیره شدند' })
     } catch {
       toast.error('خطا در اجرای بات‌ها', { description: 'اتصال را بررسی کنید' })
@@ -209,9 +201,7 @@ export default function Home() {
                 تلفیقی — {faNum(fusion.fused)}
               </Badge>
             )}
-            <span className="hidden text-[11px] tabular-nums text-zinc-500 sm:block">
-              رفرش خودکار: {faNum(Math.max(0, countdown))} ثانیه
-            </span>
+            <AutoRefreshBadge seconds={REFRESH_SECONDS} onRefresh={handleAutoRefresh} />
             <span className="hidden text-[11px] tabular-nums text-zinc-500 md:block" dir="ltr">
               {clock} Tehran
             </span>

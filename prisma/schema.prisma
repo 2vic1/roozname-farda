@@ -222,3 +222,15 @@ model MarketForecastPath {
   @@unique([symbol, method, runDate])
   @@index([symbol, runDate])
 }
+
+// ─── چارت‌های دلخواه کاربر (افراد/دولت‌های انتخابی) — وارد استرولوزی جنگ و تحلیل می‌شوند ───
+model CustomEntity {
+  id        String   @id @default(cuid())
+  name      String   // نام نمایشی فارسی
+  kind      String   @default("person") // state | person
+  isoUtc    DateTime // لحظه تولد/تأسیس به UTC
+  lat       Float
+  lon       Float
+  placeFa   String   @default("تهران")
+  createdAt DateTime @default(now())
+}

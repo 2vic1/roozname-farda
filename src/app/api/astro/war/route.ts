@@ -8,6 +8,10 @@ import {
   warAiDigest,
   warFallbackAi,
   entityMeta,
+  loadCustomMetas,
+  customMetasInUse,
+  warEntitiesInUse,
+  getCycleWindowChart,
   WAR_ENTITIES,
   WAR_PAIRS,
   type WarAi,
@@ -34,6 +38,26 @@ function extractJson(text: string): Record<string, unknown> | null {
 }
 
 const aiCache = new Map<string, WarAi>()
+
+/** مدل گاهی شناسه چارت را کامل تکرار نمی‌کند (مثلاً «custom» به‌جای «custom:cuid») —
+ *  شناسه‌ها را به شناسه واقعی نگاشت می‌کنیم تا خوانش هر چارت در UI پیدا شود */
+function normalizeAiReads(ai: WarAi): WarAi {
+  const ids = warEntitiesInUse()
+  const customs = customMetasInUse()
+  const byName = new Map<string, string>()
+  for (const m of ids) {
+    byName.set(m.fa, m.id)
+    byName.set(m.short, m.id)
+  }
+  ai.reads = (ai.reads ?? []).map((r) => {
+    if (ids.some((m) => m.id === r.id)) return r
+    const nameHit = byName.get(r.id)
+    if (nameHit) return { ...r, id: nameHit }
+    if (r.id.startsWith('custom') && customs.length === 1) return { ...r, id: customs[0].id }
+    return r
+  })
+  return ai
+}
 
 async function askAi(digest: string, prompt: string, maxTokens: number): Promise<WarAi | null> {
   try {
@@ -63,13 +87,14 @@ const AI_PROMPT = `بر اساس داده‌های زیر، پیشگویی اس�
 فقط JSON معتبر بده:
 {
  "executive": "۲ تا ۴ جمله جمع‌بندی وضعیت آسمان جنگی همین امروز — با ذکر عدد شاخص و جدی‌ترین خط",
- "reads": [{"id": "شناسه چارت", "read": "۳ تا ۵ جمله وضعیت نجومی همین چارت و ریسک آن — برای هر ۶ چارت"}],
+ "reads": [{"id": "شناسه چارت", "read": "۳ تا ۵ جمله وضعیت نجومی همین چارت و ریسک آن — برای همه چارت‌ها"}],
  "flashpoints": [{"pair": "الف↔ب", "read": "۲ تا ۴ جمله تحلیل نقطه انفجار این جفت بر اساس سینستری و پنجره‌ها"}],
  "calls": [{"when": "تاریخ جلالی دقیق (همان که در داده آمده)", "windowDays": عدد, "what": "چه انتظاری با این پنجره می‌رود — کوبنده و مشخص", "confidence": عدد ۰-۱۰۰}],
  "prediction": "پیشگویی سرفصل اصلی: ۴ تا ۷ جمله — کدام ماه‌ها خطرناک‌اند، چه نوع رویدادی (حمله مستقیم/نیابتی/تحریم/ترور/غافلگیری) در کدام پنجره محتمل‌تر است و سقف/کف اسکالاسیون چه می‌تواند باشد",
  "monthlyNote": "۲ تا ۳ جمله درباره گرفتگی‌ها و ماه‌های آینده"
 }
-شناسه چارت‌ها: ${WAR_ENTITIES.map((e) => `${e.id}=${e.fa}`).join('، ')}.
+شناسه چارت‌ها: ${warEntitiesInUse().map((e) => `${e.id}=${e.fa}`).join('، ')}.
+الزام: آرایه reads باید دقیقاً برای هر شناسه بالا یک عضو داشته باشد — از جمله چارت‌های دلخواه کاربر (شناسه‌های custom:...)؛ هیچ چارتی را جا نینداز.
 در calls فقط از تاریخ‌هایی که در «پنجره‌های ترانزیتی» داده شده استفاده کن؛ چیزی از خودت تاریخ نساز. مهم‌ترین ۵ تا ۸ پنجره را انتخاب کن.`
 
 // چرخه‌های ۴۰روزه گن/هرست از آتش‌بس — همان شواهدی که در امتیاز ریسک (cycleScore) و
@@ -130,30 +155,43 @@ async function getCycles40(): Promise<WarCycle40[]> {
 
 export async function GET() {
   try {
+    // چارت‌های دلخواه کاربر — باید قبل از هر محاسبه‌ای در رجیستری ثبت شوند تا
+    // در پنجره‌ها، سینستری، دیجست AI و چارت‌ها حضور داشته باشند
+    const customs = await loadCustomMetas()
     const agg = getWarAggregate()
-    const key = `full-${new Date().toISOString().slice(0, 13)}` // کش ساعتی برای AI
+    // کش ساعتی AI — با تغییر چارت‌های دلخواه باطل شود
+    const customHash = customs.map((m) => m.id).join(',').slice(0, 60)
+    const key = `full-${new Date().toISOString().slice(0, 13)}-${customHash}`
     let ai = aiCache.get(key) ?? null
     let aiSource: 'ai' | 'engine' = ai ? 'ai' : 'engine' // کش فقط حاوی نتایج موفق AI است
     if (!ai) {
       const digest = warAiDigest()
       const result = await askAi(digest, AI_PROMPT, 3200)
       if (result) {
-        ai = result
+        ai = normalizeAiReads(result)
         aiSource = 'ai'
         aiCache.set(key, ai)
       }
     }
     if (!ai) ai = warFallbackAi()
 
+    // سینستری چارت‌های دلخواه با سه کنشگر اصلی — تا در تحلیل استفاده شوند
+    const customPairs = customMetasInUse().flatMap((m) => [
+      { a: m.id, b: 'iran', label: 'چارت دلخواه کاربر ↔ ایران' },
+      { a: m.id, b: 'israel', label: 'چارت دلخواه کاربر ↔ اسرائیل' },
+      { a: m.id, b: 'usa', label: 'چارت دلخواه کاربر ↔ آمریکا' },
+    ])
+
     return NextResponse.json({
       ok: true,
       generatedAtIso: new Date().toISOString(),
       warIndex: agg.index,
-      entities: WAR_ENTITIES.map((m) => getEntityChart(m.id)),
-      pairs: WAR_PAIRS.map((p) => getSynastry(p.a, p.b)),
+      entities: warEntitiesInUse().map((m) => getEntityChart(m.id)),
+      pairs: [...WAR_PAIRS.map((p) => getSynastry(p.a, p.b)), ...customPairs.map((p) => getSynastry(p.a, p.b))],
       windows: agg.windows.slice(0, 60),
       eclipses: agg.eclipses,
       cycles40: await getCycles40(),
+      windowChart: getCycleWindowChart(),
       ai,
       aiSource,
     })
@@ -171,6 +209,7 @@ export async function POST(req: Request) {
     const body = (await req.json()) as { a?: string; b?: string }
     const a = body.a ?? 'iran'
     const b = body.b ?? 'israel'
+    await loadCustomMetas() // برای پذیرش شناسه چارت‌های دلخواه
     const ma = entityMeta(a)
     const mb = entityMeta(b)
 

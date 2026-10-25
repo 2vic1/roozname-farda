@@ -3,6 +3,9 @@
 // چارت‌ها بر پایه داده‌های شناخته‌شده استرولوژی جهانی (Rodden-rated برای افراد،
 // چارت سیبلی برای آمریکا، لحظه اعلام جمهوری اسلامی برای ایران، اعلام استقلال برای اسرائیل).
 import * as A from 'astronomy-engine'
+import { db } from '@/lib/db'
+import { WAR_12_END, WINDOW_40 } from './cycles'
+import { tehranDateStr } from './tehran'
 import {
   ASPECTS,
   ASPECT_FA,
@@ -109,9 +112,59 @@ export const WAR_PAIRS: { a: string; b: string; label: string }[] = [
 ]
 
 export function entityMeta(id: string): WarEntityMeta {
-  const m = WAR_ENTITIES.find((x) => x.id === id)
+  const m = WAR_ENTITIES.find((x) => x.id === id) ?? customRegistry.get(id)
   if (!m) throw new Error(`چارت ناشناخته: ${id}`)
   return m
+}
+
+// ═══ چارت‌های دلخواه کاربر (افراد/دولت‌های انتخابی) ═══
+
+const customRegistry = new Map<string, WarEntityMeta>()
+
+/** خواندن چارت‌های دلخواه کاربر از دیتابیس و ثبت در رجیستری — قبل از هر محاسبه‌ای صدا زده می‌شود */
+export async function loadCustomMetas(): Promise<WarEntityMeta[]> {
+  try {
+    const rows = await db.customEntity.findMany({ orderBy: { createdAt: 'asc' }, take: 8 })
+    const metas: WarEntityMeta[] = rows.map((r) => {
+      const d = new Date(r.isoUtc)
+      const j = utcToJalaliTehran(d)
+      const hhmm = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Tehran', hour: '2-digit', minute: '2-digit', hour12: false,
+      }).format(d)
+      return {
+        id: `custom:${r.id}`,
+        fa: r.name,
+        short: r.name.length > 16 ? r.name.slice(0, 16) + '…' : r.name,
+        flag: r.kind === 'state' ? '🏛️' : '👤',
+        kind: r.kind === 'state' ? 'state' : 'leader',
+        isoUtc: d.toISOString(),
+        lat: r.lat,
+        lon: r.lon,
+        placeFa: r.placeFa,
+        chartFa: `${j.jd} ${jalaliMonthLabel(j.jy, j.jm).split(' ')[0]} ${j.jy} — ساعت ${hhmm} محل (${r.placeFa})`,
+        sourceNote: 'چارت دلخواه افزوده‌شده توسط کاربر — با همان موتور دقیق ephemeris محاسبه می‌شود',
+        hotRole: 'چارت انتخابی کاربر — در سینستری، پنجره‌ها و تحلیل AI فعال',
+      }
+    })
+    customRegistry.clear()
+    for (const m of metas) customRegistry.set(m.id, m)
+    // کش چارت‌های سفارشی قدیمی را خالی کن (ممکن است تغییر کرده باشند)
+    for (const key of [...chartCache.keys()]) {
+      if (key.startsWith('custom:')) chartCache.delete(key)
+    }
+    return metas
+  } catch {
+    return []
+  }
+}
+
+export function customMetasInUse(): WarEntityMeta[] {
+  return [...customRegistry.values()]
+}
+
+/** همه چارت‌های فعال: پایه ثابت + دلخواه کاربر */
+export function warEntitiesInUse(): WarEntityMeta[] {
+  return [...WAR_ENTITIES, ...customRegistry.values()]
 }
 
 // ═══ ۲) محاسبه چارت موجودیت — همان موتور چارت تولد ═══
@@ -660,6 +713,77 @@ export interface WarCycle40 {
   daysLeft: number
 }
 
+export interface CycleWindowAspect {
+  transitFa: string // سیاره آسمان پنجره
+  aspectFa: string
+  targetFa: string // نقطه از چارت لنگر
+  entityFa: string // کدام چارت
+  orb: number
+}
+
+/** چارت آسمان در پنجره ۴۰روزه بعدی از آتش‌بس — همان چیزی که کاربر «چارت جنگ ۴۰روزه» می‌نامد */
+export interface CycleWindowChart {
+  date: string
+  k: number
+  jalali: string
+  utcNoon: string
+  western: WesternChart
+  aspects: CycleWindowAspect[]
+}
+
+const WINDOW_ANCHORS = ['war12', 'iran', 'israel'] as const
+
+export function getCycleWindowChart(): CycleWindowChart | null {
+  const today = tehranDateStr()
+  const end = new Date(WAR_12_END + 'T00:00:00Z')
+  let k = 1
+  let date = ''
+  for (; k <= 40; k++) {
+    const ds = new Date(end.getTime() + WINDOW_40 * k * DAY_MS).toISOString().slice(0, 10)
+    if (ds >= today) {
+      date = ds
+      break
+    }
+  }
+  if (!date) return null
+  // ظهر تهران (۱۲:۰۰ به وقت محل = ۰۸:۳۰ UTC با آفست ثابت ‎+03:30 ایران)
+  const at = new Date(date + 'T08:30:00Z')
+  const western = computeWestern(at, 35.6892, 51.389)
+  const sky = hotPoints(western)
+  const aspects: CycleWindowAspect[] = []
+  for (const anchorId of WINDOW_ANCHORS) {
+    let anchor: WarEntityChart
+    try {
+      anchor = getEntityChart(anchorId)
+    } catch {
+      continue
+    }
+    for (const p of hotPoints(anchor.western)) {
+      for (const s of sky) {
+        const hit = findAspectDef(s.lon, p.lon)
+        if (hit && hit.aspect.hard) {
+          aspects.push({
+            transitFa: s.fa,
+            aspectFa: ASPECT_FA[hit.aspect.key],
+            targetFa: p.fa,
+            entityFa: anchor.meta.short,
+            orb: Math.round(hit.orb * 10) / 10,
+          })
+        }
+      }
+    }
+  }
+  aspects.sort((a, b) => a.orb - b.orb)
+  return {
+    date,
+    k,
+    jalali: jalaliOf(at),
+    utcNoon: at.toISOString(),
+    western,
+    aspects: aspects.slice(0, 10),
+  }
+}
+
 export interface WarPayload {
   ok: true
   generatedAtIso: string
@@ -669,6 +793,7 @@ export interface WarPayload {
   windows: WarWindow[]
   eclipses: WarEclipse[]
   cycles40: WarCycle40[]
+  windowChart: CycleWindowChart | null
   ai: WarAi
   aiSource: 'ai' | 'engine'
 }
@@ -684,7 +809,7 @@ function computeWindowsForDay(): { windows: WarWindow[]; eclipses: WarEclipse[] 
   const from = Date.now() - 2 * DAY_MS
   const to = from + 120 * DAY_MS
   const windows: WarWindow[] = []
-  for (const meta of WAR_ENTITIES) {
+  for (const meta of warEntitiesInUse()) {
     windows.push(...scanEntityWindows(meta, from, to, meta.id))
   }
   windows.sort((a, b) => b.severity - a.severity || a.atIso.localeCompare(b.atIso))
@@ -695,7 +820,9 @@ function computeWindowsForDay(): { windows: WarWindow[]; eclipses: WarEclipse[] 
 export function getWarAggregate(): {
   windows: WarWindow[]; eclipses: WarEclipse[]; index: WarIndexInfo
 } {
-  const key = tehranDayKey()
+  // کلید کش شامل چارت‌های دلخواه است — با افزودن/حذف، کش روز باطل می‌شود
+  const customKey = [...customRegistry.keys()].sort().join(',')
+  const key = `${tehranDayKey()}|${customKey}`
   const cached = dayCache.get(key)
   if (cached) return cached
   const { windows, eclipses } = computeWindowsForDay()
@@ -729,14 +856,22 @@ function windowsDigest(windows: WarWindow[]): string {
 
 export function warAiDigest(): string {
   const { windows, eclipses, index } = getWarAggregate()
-  const pairs = WAR_PAIRS.map((p) => {
+  const all = warEntitiesInUse()
+  // جفت‌های ثابت + چارت‌های دلخواه کاربر در برابر سه کنشگر اصلی
+  const customs = customMetasInUse()
+  const customPairs = customs.flatMap((m) => [
+    { a: m.id, b: 'iran', label: 'چارت دلخواه کاربر ↔ ایران' },
+    { a: m.id, b: 'israel', label: 'چارت دلخواه کاربر ↔ اسرائیل' },
+    { a: m.id, b: 'usa', label: 'چارت دلخواه کاربر ↔ آمریکا' },
+  ])
+  const pairs = [...WAR_PAIRS, ...customPairs].map((p) => {
     const s = getSynastry(p.a, p.b)
     return `- ${s.aFa}↔${s.bFa} (${p.label}): تنش ${s.tension}/100؛ ${s.aspects.slice(0, 3).map((a) => `${a.aFa} ${a.aspectFa} ${a.bFa} (${a.orb.toFixed(1)}°)`).join('، ')}`
   }).join('\n')
   const eclipsesTxt = eclipses.length
     ? eclipses.map((e) => `- ${e.kind === 'solar' ? 'خورشیدگرفتگی' : 'ماهگرفتگی'} ${e.jalali} در ${e.degree}${e.hits.length ? ` ← ضربه به: ${e.hits.map((h) => `${h.targetFa} ${h.entityFa} (${h.orb}°)`).join('، ')}` : ''}`).join('\n')
     : '- در افق ۱۲۰ روز گرفتگی مؤثری روی نقاط چارت‌ها نیست'
-  const returnsTxt = WAR_ENTITIES.map((m) => {
+  const returnsTxt = warEntitiesInUse().map((m) => {
     const r = getEntityChart(m.id).returns.slice(0, 2)
     return r.length ? `- ${m.short}: ${r.map((x) => `${x.bodyFa} به ${x.targetFa} در ${x.jalali}`).join('، ')}` : ''
   }).filter(Boolean).join('\n')
@@ -744,8 +879,8 @@ export function warAiDigest(): string {
   return `شاخص جنگ آسمانی: ${index.index}/100 — ${index.note}
 اجزای شاخص: ${index.parts.map((p) => `${p.label}=${p.value}`).join('، ')}
 
-چارت‌های پایه:
-${WAR_ENTITIES.map((m) => entityDigest(m.id)).join('\n')}
+چارت‌های پایه و دلخواه:
+${all.map((m) => entityDigest(m.id)).join('\n')}
 
 سینستری جفت‌ها:
 ${pairs}
@@ -775,7 +910,7 @@ export function warFallbackAi(): WarAi {
   })
   return {
     executive: `شاخص جنگ آسمانی ${index.index}/۱۰۰ — ${index.note}. موتور بدون هوش مصنوعی، از ترانزیت‌های سخت دقیق و سینستری چارت‌های پایه ساخته شده است.`,
-    reads: WAR_ENTITIES.map((m) => {
+    reads: warEntitiesInUse().map((m) => {
       const c = getEntityChart(m.id)
       const sun = c.western.planets.find((p) => p.body === 'Sun')
       const mars = c.western.planets.find((p) => p.body === 'Mars')
