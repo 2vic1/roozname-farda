@@ -97,6 +97,14 @@ export const WAR_ENTITIES: WarEntityMeta[] = [
     sourceNote: 'چارت رویداد — لنگر چرخه جنگی جاری؛ سالگردها و ترانزیت‌هایش ردپای آینده را می‌دهد',
     hotRole: 'لنگر چرخه جنگ — سالگرد و روندها',
   },
+  {
+    id: 'war40', fa: 'جنگ ۴۰روزه ایران–آمریکا', short: 'جنگ ۴۰روزه', flag: '💥', kind: 'event',
+    isoUtc: '2026-02-28T08:30:00Z', lat: 35.6892, lon: 51.389,
+    placeFa: 'تهران (مرکز صحنه)',
+    chartFa: '۹ اسفند ۱۴۰۴ — ۱۲:۰۰ تهران (ساعت تقریبی)؛ پایان ≈ ۱۹ فروردین ۱۴۰۵ (۳۹-۴۰ روز)',
+    sourceNote: 'چارت رویداد جنگ ۴۰روزه ایران–آمریکا — ساعت دقیق آغاز ثبت نشده؛ چارت ظهر به‌عنوان تقریب استاندارد، سیارات دقیق‌اند و طالع/خانه‌ها تقریبی',
+    hotRole: 'چرخه جنگ دوم — ۳۹-۴۰ روز درگیری ایران–آمریکا؛ سالگردها و ترانزیت‌هایش پنجره تکرار را می‌دهد',
+  },
 ]
 
 // جفت‌های داغ سینستری
@@ -112,6 +120,10 @@ export const WAR_PAIRS: { a: string; b: string; label: string }[] = [
   { a: 'cycle40', b: 'war12', label: 'پنجره ۴۰روزه بر لحظه آغاز جنگ' },
   { a: 'cycle40', b: 'iran', label: 'آسمان پنجره ۴۰روزه بر چارت ایران' },
   { a: 'cycle40', b: 'israel', label: 'پنجره ۴۰روزه بر چارت اسرائیل' },
+  { a: 'war40', b: 'iran', label: 'جنگ دوم بر میزبان' },
+  { a: 'war40', b: 'usa', label: 'جنگ ۴۰روزه با آمریکا' },
+  { a: 'war40', b: 'war12', label: 'پیوند دو چرخه جنگ' },
+  { a: 'war40', b: 'israel', label: 'جنگ ۴۰روزه و جبهه اسرائیل' },
 ]
 
 // ═══ چارت رویدادی چرخه ۴۰روزه — entity کامل مثل جنگ ۱۲روزه ═══
@@ -265,6 +277,7 @@ const RETURN_NOTES: Record<string, string> = {
   'trump:Uranus:Sun': 'اورانوس به خورشید ترامپ — تکانه ناگهانی؛ اعلامیه‌های غافلگیرکننده',
   'netanyahu:Saturn:Sun': 'بازگشت زحل نتانیاهو — دوره سرنوشت‌سازی شخصی؛ آخرین بار ۲۰۱۹-۲۰: دادگاه و بحران',
   'war12:Mars:Sun': 'مریخ به خورشید چارت جنگ — سالگرد جوشش دوباره صحنه',
+  'war40:Mars:Sun': 'مریخ به خورشید چارت جنگ ۴۰روزه — سالگرد جوشش دوباره جبهه ایران–آمریکا',
 }
 
 /** بازگشت‌های سیاره‌ای چارت در افق ۳ سال — چرخه‌های تکرار تاریخ */
@@ -414,6 +427,7 @@ const RELATION_PRIOR: Record<string, number> = {
   'netanyahu|trump': 22, 'netanyahu|usa': 30, 'netanyahu|war12': 48,
   'trump|usa': 40, 'trump|war12': 40, 'usa|war12': 44,
   'cycle40|war12': 66, 'cycle40|iran': 58, 'cycle40|israel': 52,
+  'iran|war40': 82, 'israel|war40': 62, 'trump|war40': 70, 'usa|war40': 84, 'war12|war40': 74,
 }
 
 const synastryCache = new Map<string, WarSynastry>()
@@ -790,7 +804,7 @@ export interface CycleWindowChart {
   aspects: CycleWindowAspect[]
 }
 
-const WINDOW_ANCHORS = ['war12', 'iran', 'israel'] as const
+const WINDOW_ANCHORS = ['war12', 'war40', 'iran', 'israel'] as const
 
 export function getCycleWindowChart(): CycleWindowChart | null {
   const meta = registerCycle40Entity()

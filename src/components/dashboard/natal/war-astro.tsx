@@ -209,9 +209,9 @@ export function WarAstroSection() {
     [data],
   )
 
-  // پرش به چارت کامل چرخه ۴۰روزه — انتخاب + اسکرول نرم به کارت جزئیات
-  const goCycle40 = useCallback(() => {
-    setSelEntity('cycle40')
+  // پرش به چارت کامل یک موجودیت — انتخاب + اسکرول نرم به کارت جزئیات
+  const goEntity = useCallback((id: string) => {
+    setSelEntity(id)
     window.setTimeout(() => {
       document.getElementById('war-chart-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }, 120)
@@ -270,7 +270,7 @@ export function WarAstroSection() {
               <p className="text-[11px] leading-5 text-zinc-500">
                 چارت‌های پایه: تأسیس جمهوری اسلامی ۱۲فروردین۱۳۵۸، چارت سیبلی آمریکا ۱۷۷۶،
                 اعلام استقلال اسرائیل ۱۹۴۸، ترامپ (رده AA)، نتانیاهو (رده B)، چارت جنگ ۱۲روزه،
-                چرخه ۴۰روزه (پنجره بعدی از آتش‌بس) + چارت‌های دلخواه شما.
+                چارت جنگ ۴۰روزه ایران–آمریکا (۹اسفند۱۴۰۴)، پنجره چرخه ۴۰روزه + چارت‌های دلخواه شما.
                 موتور: ephemeris دقیق + جنبه سخت با پنجره ±روز.
               </p>
             </div>
@@ -288,9 +288,9 @@ export function WarAstroSection() {
               <Badge variant="outline" className="border-zinc-700 text-[9px] text-zinc-500">گن + هرست</Badge>
             </div>
             <p className="text-[11px] leading-5 text-zinc-400">
-              «جنگ ۴۰روزه» یک جنگ تاریخی نیست — عدد ۴۰ چرخه زمانی گن/هرست از آتش‌بس ۳ تیر ۱۴۰۴ است
-              و مستقیماً در امتیاز چرخه ریسک و سناریوهای روز حمله به‌کار می‌رود.
-              چارت رویدادی این پنجره — دقیقاً مثل چارت جنگ ۱۲روزه — به فهرست چارت‌ها اضافه شده است:
+              «چرخه ۴۰روزه» گن/هرست از آتش‌بس جنگ ۱۲روزه (۳ تیر ۱۴۰۴) شمرده می‌شود و مستقیماً در امتیاز چرخه ریسک و
+              سناریوهای روز حمله به‌کار می‌رود — این با «جنگ ۴۰روزه ایران–آمریکا» (۹ اسفند ۱۴۰۴) که چارت کاملش در
+              فهرست چارت‌هاست فرق دارد.
             </p>
             <div className="flex flex-wrap gap-1.5">
               {data.cycles40.map((c) => (
@@ -327,17 +327,30 @@ export function WarAstroSection() {
                 </div>
               </div>
             )}
-            {data.entities.some((e) => e.meta.id === 'cycle40') && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={goCycle40}
-                className="gap-2 border-amber-500/40 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25"
-              >
-                <CalendarClock className="h-3.5 w-3.5" />
-                دیدن چارت کامل چرخه ۴۰روزه — مثل چارت جنگ ۱۲روزه
-              </Button>
-            )}
+            <div className="flex flex-wrap gap-2">
+              {data.entities.some((e) => e.meta.id === 'cycle40') && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => goEntity('cycle40')}
+                  className="gap-2 border-amber-500/40 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25"
+                >
+                  <CalendarClock className="h-3.5 w-3.5" />
+                  چارت کامل پنجره ۴۰روزه
+                </Button>
+              )}
+              {data.entities.some((e) => e.meta.id === 'war40') && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => goEntity('war40')}
+                  className="gap-2 border-red-500/40 bg-red-500/10 text-red-200 hover:bg-red-500/20"
+                >
+                  <Swords className="h-3.5 w-3.5" />
+                  چارت کامل جنگ ۴۰روزه ایران–آمریکا
+                </Button>
+              )}
+            </div>
           </CardContent>
         </Card>
       )}
@@ -350,7 +363,7 @@ export function WarAstroSection() {
         <h3 className="mb-2 flex items-center gap-2 text-sm font-bold text-zinc-200">
           <Landmark className="h-4 w-4 text-red-400" /> چارت‌های پایه پیشگویی
         </h3>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
           {data.entities.map((e) => {
             const active = e.meta.id === selEntity
             const km = KIND_META[e.meta.kind]
