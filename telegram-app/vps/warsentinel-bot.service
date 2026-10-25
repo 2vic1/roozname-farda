@@ -1,0 +1,20 @@
+[Unit]
+Description=Roozname Farda Telegram Bot (long-polling)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/warsentinel/bot
+EnvironmentFile=/opt/warsentinel/bot/.env
+Environment=NODE_ENV=production
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/local/bin/bun bot.mjs
+Restart=always
+RestartSec=10
+MemoryMax=300M
+StandardOutput=append:/opt/warsentinel/logs/bot.log
+StandardError=append:/opt/warsentinel/logs/bot.err.log
+
+[Install]
+WantedBy=multi-user.target

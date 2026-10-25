@@ -1,0 +1,224 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── منابع خبری (تلگرام / ایکس / اینستاگرام / RSS) ───
+model Source {
+  id          String     @id @default(cuid())
+  type        String // "telegram" | "x" | "instagram" | "rss"
+  handle      String     @unique // شناسه کانال/اکانت یا آدرس کامل RSS
+  label       String
+  lang        String     @default("en")
+  weight      Float      @default(1) // ضریب اعتبار منبع 0.5 تا 1.5
+  storiesOnly Boolean    @default(false) // اینستاگرام: فقط استوری
+  active      Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  newsItems   NewsItem[]
+}
+
+// ─── اخبار جمع‌آوری‌شده با امتیاز تنش + تحلیل هوش مصنوعی ───
+model NewsItem {
+  id           String   @id @default(cuid())
+  sourceId     String?
+  sourceType   String   @default("telegram") // telegram | x | instagram | rss
+  sourceLabel  String
+  title        String
+  content      String   @default("") // متن کامل اصلی
+  textFa       String? // ترجمه فارسی برای خبرهای خارجی
+  aiVerdict    String   @default("unknown") // war_signal|tension|diplomacy|routine|unknown
+  isAd         Boolean  @default(false) // تبلیغات — حذف از تحلیل
+  isOpinion    Boolean  @default(false) // نظر شخصی — حذف از تحلیل
+  url          String?
+  externalId   String   @unique // برای جلوگیری از تکرار
+  lang         String   @default("en")
+  publishedAt  DateTime
+  tensionScore Float    @default(0) // 0 تا 100
+  level        String   @default("calm") // calm|watch|elevated|high|critical
+  keywords     String   @default("[]")
+  createdAt    DateTime @default(now())
+  source       Source?  @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+
+  @@index([publishedAt])
+  @@index([tensionScore])
+}
+
+// ─── لحظه‌نگاشت دارایی‌های بازار ───
+model AssetSnapshot {
+  id        String   @id @default(cuid())
+  symbol    String   @unique
+  name      String
+  category  String // energy|metals|stocks|indices|crypto|risk
+  price     Float
+  change1d  Float?
+  change7d  Float?
+  change30d Float?
+  unit      String?
+  spark     String   @default("[]") // آرایه قیمت‌های اخیر برای اسپارک‌لاین
+  updatedAt DateTime @updatedAt
+}
+
+// ─── سنجه‌های کلان (شاخص ترس وطمع، دامیننس بیت‌کوین و ...) ───
+model MacroMetric {
+  key       String   @id
+  value     Float
+  label     String
+  extra     String   @default("{}")
+  updatedAt DateTime @updatedAt
+}
+
+// ─── امتیاز ریسک روزانه + پیش‌بینی روز حمله + یادگیری ───
+model RiskDaily {
+  id                 String   @id @default(cuid())
+  date               String   @unique // YYYY-MM-DD به وقت تهران
+  score              Float
+  level              String // calm|watch|elevated|high|critical
+  trend              String   @default("flat") // up|down|flat
+  newsScore          Float
+  marketScore        Float
+  cycleScore         Float
+  flightScore        Float    @default(0)
+  patternScore       Float    @default(0) // امتیاز الگوهای کلان تاریخی (رفتار بازار پیش از بحران)
+  predictedAttackDate String? // پیش‌بینی روز حمله YYYY-MM-DD (محتمل‌ترین)
+  attackDateNear     String? // سناریو نزدیک‌ترین روز حمله
+  attackDateMid      String? // سناریو میانه (وسط پنجره محتمل)
+  attackDateFar      String? // سناریو دورترین روز حمله
+  attackConfidence   Float    @default(0) // 0 تا 100
+  rationaleFa        String   @default("") // توضیح فارسی پیش‌بینی
+  outcome            String   @default("pending") // pending|hit|miss|neutral
+  outcomeNote        String?
+  forecast           String   @default("[]") // [{date, score, level}]
+  detail             String   @default("{}")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+// ─── الگوهای کلان: تطبیق رفتار فعلی بازار با امضای پیش از بحران‌های تاریخی ───
+model MacroPattern {
+  id         String   @id @default(cuid())
+  eventKey   String   @unique // مثل gulf1990
+  eventName  String   // نام فارسی رویداد تاریخی
+  similarity Float    // 0 تا 100 شباهت امضای امروز با امضای پیش از آن رویداد
+  score      Float    // پیشنهاد ریسک 0 تا 100 بر اساس شدت آن بحران
+  windowLo   Int      // کمینه روز فاصله امضا تا رویداد در آن مقطع
+  windowHi   Int      // بیشینه روز فاصله
+  note       String   @default("") // توضیح فارسی الگو
+  updatedAt  DateTime @updatedAt
+}
+
+// ─── چرخه‌های زمانی (گن، فیبوناچی، نجومی، رویداد) ───
+model Cycle {
+  id     String  @id @default(cuid())
+  date   String // YYYY-MM-DD
+  label  String
+  family String // gann|fibonacci|solar|event|custom
+  weight Int     @default(2) // شدت 1 تا 5
+  note   String?
+
+  @@index([date])
+}
+
+// ─── رویدادهای مرجع تاریخی (جنگ ۱۲ روزه و پنجره ۴۰ روزه) ───
+model RefEvent {
+  id        String  @id @default(cuid())
+  name      String  @unique
+  startDate String
+  endDate   String
+  note      String?
+}
+
+// ─── گزارش‌های هوش مصنوعی ───
+model Report {
+  id        String   @id @default(cuid())
+  content   String
+  riskScore Float
+  model     String   @default("glm-4.6")
+  createdAt DateTime @default(now())
+}
+
+// ─── لحظه‌نگاشت پروازهای نظامی آمریکا (سوخت‌رسان/ترابری/جنگنده/شناسایی) ───
+model FlightSnapshot {
+  id           String   @id @default(cuid())
+  total        Int      @default(0)
+  tankers      Int      @default(0)
+  transport    Int      @default(0)
+  fighters     Int      @default(0)
+  recon        Int      @default(0)
+  bombers      Int      @default(0)
+  other        Int      @default(0)
+  nearIran     Int      @default(0) // در شعاع ۹۰۰ کیلومتری ایران
+  nearestKm    Float?
+  significance Float    @default(0) // 0 تا 100 — اهمیت برای ریسک جنگ
+  details      String   @default("[]") // [{callsign,type,category,lat,lon,altFt,kmToIran}]
+  sourceApi    String   @default("adsb.lol")
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// ─── تنظیمات سراسری (کلید هوش مصنوعی و ...) ───
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+// ─── لاگ اجرای بات‌ها ───
+model BotRun {
+  id         String   @id @default(cuid())
+  bot        String // news|market|macro|report
+  status     String   @default("ok") // ok|error
+  message    String?
+  items      Int      @default(0)
+  durationMs Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@index([bot, createdAt])
+}
+
+// ─── چارت‌های تولد ذخیره‌شده (استرولوژی شخصی) ───
+model NatalChart {
+  id        String   @id @default(cuid())
+  name      String   @default("")
+  jy        Int // سال تولد جلالی
+  jm        Int // ماه تولد جلالی 1-12
+  jd        Int // روز تولد جلالی
+  hour      Int // ساعت قانونی محلی 0-23
+  minute    Int
+  city      String // نام شهر از فهرست
+  createdAt DateTime @default(now())
+}
+
+// ─── تماس‌های کلیدی پیش‌بینی ۳۰روزه بازار (برای دقت‌سنجی بعدی) ───
+model MarketForecast {
+  id         String   @id @default(cuid())
+  symbol     String // BTCUSDT | ETHUSDT | NVDA | ^GSPC
+  method     String // technical | cycles | astro | fusion
+  kind       String   @default("end") // end | peak | trough | turn
+  runDate    String // روز اجرای پیش‌بینی YYYY-MM-DD (تهران)
+  targetDate String // روز هدف پیش‌بینی YYYY-MM-DD
+  price      Float // قیمت هدف مشخص
+  note       String?
+  createdAt  DateTime @default(now())
+
+  @@unique([symbol, method, kind, runDate])
+  @@index([symbol, runDate])
+}
+
+// ─── مسیر روزانه پیش‌بینی ۳۰روزه (برای دقت‌سنجی زنده: هر روز کندل واقعی کنار پیش‌بینی همان روز) ───
+model MarketForecastPath {
+  id        String   @id @default(cuid())
+  symbol    String
+  method    String
+  runDate   String
+  lastClose Float
+  pathJson  String   // [{"date","price","lo","hi"}] — ۳۰ روز آینده در لحظه اجرا
+  createdAt DateTime @default(now())
+
+  @@unique([symbol, method, runDate])
+  @@index([symbol, runDate])
+}

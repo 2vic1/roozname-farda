@@ -1,0 +1,11 @@
+{
+  "name": "sdk",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "VPS shim for tgcloud 'sdk' module — bun:sqlite + Telegram Bot API (drop-in, no platform dependency)",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./db": "./db.js"
+  }
+}

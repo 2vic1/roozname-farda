@@ -1,0 +1,7 @@
+{
+  "name": "warsentinel-bot",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Roozname Farda (روزنامه فردا) Telegram bot on VPS — tgcloud modules + sdk shim (bun:sqlite)"
+}

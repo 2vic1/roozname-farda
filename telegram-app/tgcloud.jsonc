@@ -1,0 +1,8 @@
+// پیکربندی پروژه tgcloud — فعلاً فقط بات (فاز ۲: static فرانت‌اند اضافه میشود)
+// بعد از ساخت فرانت با Vite، این بخش فعال شود:
+// {
+//   "static": { "source": "front/dist", "spa": true, "immutable": ["/assets/*"] }
+// }
+{
+  "$schema": "./node_modules/@tgcloud/cli/schema/tgcloud.json"
+}
