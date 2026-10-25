@@ -12,15 +12,26 @@ import {
 } from '@/components/ui/select'
 import {
   Swords, TriangleAlert, Eclipse, Sparkles, ArrowLeftRight, Radar, CalendarClock,
-  Loader2, Crown, Landmark, Flame, Coins, Eye, ScrollText, Gauge,
+  Loader2, Crown, Landmark, Flame, Coins, Eye, ScrollText, Gauge, Timer,
 } from 'lucide-react'
 import { ZodiacWheel } from './wheel'
+import { utcToJalaliTehran, jalaliMonthLabel } from '@/lib/jalali'
 import type {
   WarPayload, WarEntityChart, WarSynastry, WarWindow, WarAi,
 } from '@/lib/war-astro'
 
 // ارقام فارسی برای هر رشته ترکیبی
 const faTxt = (s: string | number) => String(s).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)])
+
+// «۶ آبان» — تاریخ جلالی کوتاه برای چیپ‌های چرخه
+const faJDate = (dateStr: string) => {
+  try {
+    const j = utcToJalaliTehran(new Date(dateStr + 'T00:00:00Z'))
+    return faTxt(`${j.jd} ${jalaliMonthLabel(j.jy, j.jm).split(' ')[0]}`)
+  } catch {
+    return faTxt(dateStr)
+  }
+}
 
 interface PairDeep {
   ok: boolean
@@ -222,6 +233,38 @@ export function WarAstroSection() {
           </div>
         </CardContent>
       </Card>
+
+      {/* ═══ چرخه‌های ۴۰روزه — شواهد عددی مدل ═══ */}
+      {data.cycles40.length > 0 && (
+        <Card className="border-amber-900/40 bg-amber-950/10">
+          <CardContent className="flex flex-col gap-2.5 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Timer className="h-4 w-4 text-amber-400" />
+              <p className="text-xs font-bold text-amber-300">چرخه‌های ۴۰روزه از آتش‌بس — شواهد عددی مدل</p>
+              <Badge variant="outline" className="border-zinc-700 text-[9px] text-zinc-500">گن + هرست</Badge>
+            </div>
+            <p className="text-[11px] leading-5 text-zinc-400">
+              «جنگ ۴۰روزه» چارت جداگانه ندارد — چارت رویداد واقعی، جنگ ۱۲روزه است (۲۳ خرداد ۱۴۰۴، ساعت ۰۲:۳۰ تهران).
+              عدد ۴۰ یک چرخه زمانی گن/هرست از آتش‌بس ۳ تیر ۱۴۰۴ است و مستقیماً در امتیاز چرخه ریسک
+              و انتخاب سناریوهای روز حمله به‌کار می‌رود:
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {data.cycles40.map((c) => (
+                <Badge
+                  key={c.date}
+                  variant="outline"
+                  className="gap-1 border-amber-500/30 bg-amber-500/5 text-[10px] text-amber-200"
+                >
+                  <Timer className="h-3 w-3" />
+                  {faTxt(c.k)}×۴۰ · {faJDate(c.date)}
+                  {c.daysLeft > 0 ? ` · ${faTxt(c.daysLeft)} روز دیگر` : ' · امروز'}
+                  {c.families.includes('gann') && c.families.includes('hurst') ? ' · گن+هرست' : ''}
+                </Badge>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* ═══ چارت‌های پایه ═══ */}
       <div>

@@ -11,7 +11,11 @@ import {
   WAR_ENTITIES,
   WAR_PAIRS,
   type WarAi,
+  type WarCycle40,
 } from '@/lib/war-astro'
+import { db } from '@/lib/db'
+import { WAR_12_END, WINDOW_40, todayStr } from '@/lib/cycles'
+import { daysBetween, tehranDateStr, addDays } from '@/lib/tehran'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -68,6 +72,62 @@ const AI_PROMPT = `بر اساس داده‌های زیر، پیشگویی اس�
 شناسه چارت‌ها: ${WAR_ENTITIES.map((e) => `${e.id}=${e.fa}`).join('، ')}.
 در calls فقط از تاریخ‌هایی که در «پنجره‌های ترانزیتی» داده شده استفاده کن؛ چیزی از خودت تاریخ نساز. مهم‌ترین ۵ تا ۸ پنجره را انتخاب کن.`
 
+// چرخه‌های ۴۰روزه گن/هرست از آتش‌بس — همان شواهدی که در امتیاز ریسک (cycleScore) و
+// انتخاب سناریوهای روز حمله استفاده می‌شوند؛ اگر جدول چرخه خالی بود محاسبه مستقیم می‌شود
+async function getCycles40(): Promise<WarCycle40[]> {
+  const today = todayStr()
+  // گن و هرست تاریخ یکسان دارند (هر دو: آتش‌بس + k×۴۰) — بر اساس تاریخ ادغام می‌شوند
+  const pick = (rows: { date: string; label: string; family: string }[]) => {
+    const upcoming = rows
+      .filter((r) => r.date >= today)
+      .sort((a, b) => a.date.localeCompare(b.date))
+    const out: WarCycle40[] = []
+    for (const r of upcoming) {
+      const last = out[out.length - 1]
+      if (last && last.date === r.date) {
+        if (r.family === 'hurst' && !last.families.includes('hurst')) last.families.push('hurst')
+        continue
+      }
+      out.push({
+        date: r.date,
+        k: Math.max(1, Math.round(daysBetween(WAR_12_END, r.date) / WINDOW_40)),
+        families: [r.family === 'hurst' ? 'hurst' : 'gann'],
+        daysLeft: daysBetween(today, r.date),
+      })
+      if (out.length >= 4) break
+    }
+    return out
+  }
+  try {
+    const rows = await db.cycle.findMany({
+      where: { label: { contains: '۴۰ روزه' } },
+      orderBy: { date: 'asc' },
+    })
+    const picked = pick(rows)
+    if (picked.length) return picked
+  } catch {
+    // جدول در دسترس نیست — محاسبه مستقیم
+  }
+  // fallback: گن k×۴۰ از آتش‌بس + هرست k×۴۰ از آتش‌بس
+  const end = new Date(WAR_12_END + 'T00:00:00Z')
+  const rows: { date: string; label: string; family: string }[] = []
+  for (let k = 1; k <= 20; k++) {
+    rows.push({
+      date: tehranDateStr(addDays(end, WINDOW_40 * k)),
+      label: `چرخه ۴۰ روزه (${k}×۴۰) از آتش‌بس`,
+      family: 'gann',
+    })
+  }
+  for (let k = 1; k <= 6; k++) {
+    rows.push({
+      date: tehranDateStr(addDays(end, WINDOW_40 * k)),
+      label: `چرخه هرست ۴۰ روزه (${k}×۴۰)`,
+      family: 'hurst',
+    })
+  }
+  return pick(rows)
+}
+
 export async function GET() {
   try {
     const agg = getWarAggregate()
@@ -93,6 +153,7 @@ export async function GET() {
       pairs: WAR_PAIRS.map((p) => getSynastry(p.a, p.b)),
       windows: agg.windows.slice(0, 60),
       eclipses: agg.eclipses,
+      cycles40: await getCycles40(),
       ai,
       aiSource,
     })

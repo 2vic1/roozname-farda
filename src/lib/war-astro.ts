@@ -653,6 +653,13 @@ export interface WarAi {
   monthlyNote: string
 }
 
+export interface WarCycle40 {
+  date: string // YYYY-MM-DD
+  k: number // ضریب چرخه: آتش‌بس + k×۴۰ روز
+  families: Array<'gann' | 'hurst'> // گن و هرست تاریخ یکسان دارند
+  daysLeft: number
+}
+
 export interface WarPayload {
   ok: true
   generatedAtIso: string
@@ -661,6 +668,7 @@ export interface WarPayload {
   pairs: WarSynastry[]
   windows: WarWindow[]
   eclipses: WarEclipse[]
+  cycles40: WarCycle40[]
   ai: WarAi
   aiSource: 'ai' | 'engine'
 }
