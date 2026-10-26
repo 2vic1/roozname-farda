@@ -142,7 +142,7 @@ export interface QuoteResult {
   change30d: number
 }
 
-function pctFrom(closes: number[], back: number): number {
+export function pctFrom(closes: number[], back: number): number {
   if (closes.length < back + 1) return 0
   const last = closes[closes.length - 1]
   const prev = closes[closes.length - 1 - back]
@@ -265,6 +265,7 @@ export async function fetchBinanceSeries(symbol: string, limit = 365): Promise<S
 export interface TvQuote {
   price: number
   changePct: number
+  expiration?: number // تاریخ انقضای قرارداد به‌صورت YYYYMMDD (برای آتی‌ها)
 }
 
 export async function fetchTradingViewQuotes(
@@ -274,7 +275,7 @@ export async function fetchTradingViewQuotes(
     'https://scanner.tradingview.com/global/scan',
     {
       symbols: { tickers, query: { types: [] } },
-      columns: ['close', 'change'],
+      columns: ['close', 'change', 'expiration'],
     }
   )
   const out: Record<string, TvQuote> = {}
@@ -285,6 +286,10 @@ export async function fetchTradingViewQuotes(
       out[row.s] = {
         price,
         changePct: typeof chg === 'number' && isFinite(chg) ? chg : 0,
+        expiration:
+          typeof row.d?.[2] === 'number' && row.d[2] > 19900000
+            ? (row.d[2] as number)
+            : undefined,
       }
     }
   }

@@ -20,6 +20,7 @@ import {
   fetchGlobalCrypto,
   fetchFearGreed,
   fetchMilitaryFlights,
+  pctFrom,
   type RawItem,
   type TvQuote,
 } from '@/lib/fetchers'
@@ -558,6 +559,97 @@ const TV_ASSET_OVERRIDES: Record<string, string> = {
   NVDA: 'NASDAQ:NVDA',
 }
 
+// ─── قرارداد ماهِ تحویل جاری نفت ───
+// چرا؟ قرارداد پیوسته «1!» تریدینگ‌ویو گاهی وسط سشن (نه پایان روز) از یک ماه تحویل به ماه بعد رول می‌کند؛
+// چون ماه‌های دورتر معمولاً گران/ارزان‌ترند، «تغییر روزانه» و اسپارک‌لاین پرش قلابی چند درصدی می‌بینند
+// (نمونه واقعی ۲۶ اکتبر ۲۰۲۶: برنت -۵.۹٪ نمایش داده شد در حالی که افت واقعی همان قرارداد -۱.۷٪ بود).
+// راه‌حل: قرارداد مشخصِ دارای نزدیک‌ترین اکسپایرِ آینده را مستقیم می‌خوانیم — همان عددی که اپ و خبرگزاری‌ها نشان می‌دهند.
+const OIL_SOURCES: Record<string, { tvPrefix: string; yahooPrefix: string }> = {
+  'BZ=F': { tvPrefix: 'ICEEUR:BRN', yahooPrefix: 'BZ' },
+  'CL=F': { tvPrefix: 'NYMEX:CL', yahooPrefix: 'CL' },
+}
+// هر دو نفت در یاهو زیر NYMEX لیست می‌شوند (حتی برنت ICE)
+const YAHOO_FUTURES_SUFFIX = '.NYM'
+const OIL_CANDIDATE_COUNT = 4
+const MONTH_CODES = 'FGHJKMNQUVXZ'
+
+interface OilContract {
+  code: string // کد ماه تحویل
+  yy: number // سال دو رقمی
+  year: number // سال کامل
+}
+
+// آینده‌ترین ماه‌های تحویل از ماه جاری (یا ماه بعد اگر از روز ۲۱ گذشته باشد)
+function upcomingContracts(): OilContract[] {
+  const now = new Date()
+  let m = now.getUTCMonth() + (now.getUTCDate() > 20 ? 1 : 0)
+  const y0 = now.getUTCFullYear()
+  const out: OilContract[] = []
+  for (let i = 0; i < OIL_CANDIDATE_COUNT + 1; i++) {
+    const mm = ((m % 12) + 12) % 12
+    const yy = y0 + Math.floor(m / 12)
+    out.push({ code: MONTH_CODES[mm], yy: yy % 100, year: yy })
+    m++
+  }
+  return out
+}
+
+// تاریخ اکسپایر تریدینگ‌ویو به‌صورت YYYYMMDD است (مثل 20261030) — نه timestamp یونیکس
+function expToMs(exp?: number): number {
+  if (!exp || exp < 19900000 || exp > 29991231) return 0
+  const s = String(exp)
+  return Date.UTC(Number(s.slice(0, 4)), Number(s.slice(4, 6)) - 1, Number(s.slice(6, 8)))
+}
+
+// قرارداد با کوچک‌ترین اکسپایرِ آینده = ماه تحویل جاری (قرارداد پیش‌رو)
+function pickFrontMonth(prefix: string, quotes: Record<string, TvQuote>): TvQuote | undefined {
+  const minExp = Date.now() + 24 * 3600 * 1000 // ۱ روز محافظت تا قرارداد منقضی‌شده انتخاب نشود
+  const rows = Object.entries(quotes)
+    .filter(([t]) => t.startsWith(prefix))
+    .map(([t, q]) => ({ exp: expToMs(q.expiration), q }))
+    .filter((r) => r.exp > minExp)
+    .sort((a, b) => a.exp - b.exp)
+  return rows[0]?.q
+}
+
+// انتخاب کوتی برای هر دارایی: نفت = قرارداد ماه تحویل (فالبک: پیوسته 1!)، بقیه = override ثابت
+function tvQuoteForAsset(
+  symbol: string,
+  quotes: Record<string, TvQuote>
+): TvQuote | undefined {
+  const src = OIL_SOURCES[symbol]
+  if (src) {
+    const front = pickFrontMonth(src.tvPrefix, quotes)
+    if (front) return front
+  }
+  const tvSym = TV_ASSET_OVERRIDES[symbol]
+  return tvSym ? quotes[tvSym] : undefined
+}
+
+// فالبک یاهو برای نفت: همان قرارداد ماه تحویل با نماد مشخص (مثل CLZ26.NYM) — نه پیوسته‌ی رول‌شده
+async function yahooFrontMonthQuote(symbol: string) {
+  const src = OIL_SOURCES[symbol]
+  if (!src) return null
+  for (const c of upcomingContracts()) {
+    try {
+      const sym = `${src.yahooPrefix}${c.code}${String(c.yy).padStart(2, '0')}${YAHOO_FUTURES_SUFFIX}`
+      const q = await fetchYahoo(sym)
+      if (q.price > 0) return q
+    } catch {
+      // قرارداد منقضی یا خطای شبکه — قرارداد بعدی
+    }
+  }
+  return null
+}
+
+// همه تیکرهای لازم برای درخواست دسته‌ای تریدینگ‌ویو (شامل کاندیداهای قرارداد نفت)
+function tvTickerList(): string[] {
+  const oilCandidates = Object.values(OIL_SOURCES).flatMap((src) =>
+    upcomingContracts().map((c) => `${src.tvPrefix}${c.code}${c.year}`)
+  )
+  return [...new Set([...Object.values(TV_ASSET_OVERRIDES), ...oilCandidates])]
+}
+
 export async function runMarketBot(): Promise<{ items: number }> {
   return logBot('market', async () => {
     let saved = 0
@@ -589,22 +681,32 @@ export async function runMarketBot(): Promise<{ items: number }> {
       })
 
     // یک درخواست برای همه نمادهای تریدینگ‌ویو؛ اگر قطع بود یاهو (کندل‌ها) تنها می‌ماند
-    const tvQuotes = await fetchTradingViewQuotes(Object.values(TV_ASSET_OVERRIDES)).catch(
+    const tvQuotes = await fetchTradingViewQuotes(tvTickerList()).catch(
       () => ({}) as Record<string, TvQuote>
     )
 
     const yahooJobs = YAHOO_ASSETS.map(async (a) => {
       try {
         const q = await fetchYahoo(a.symbol)
-        const tvSym = TV_ASSET_OVERRIDES[a.symbol]
-        const tv = tvSym ? tvQuotes[tvSym] : undefined
+        const tv = tvQuoteForAsset(a.symbol, tvQuotes)
         if (tv) {
           q.price = tv.price
           q.change1d = tv.changePct
+        } else if (OIL_SOURCES[a.symbol]) {
+          // تریدینگ‌ویو در دسترس نبود: فالبک یاهو هم با قرارداد ماه تحویل، نه پیوسته‌ی رول‌شده
+          const alt = await yahooFrontMonthQuote(a.symbol)
+          if (alt) {
+            q.price = alt.price
+            q.change1d = alt.change1d
+          }
         }
         // آخرین نقطه اسپارک‌لاین باید دقیقاً برابر قیمت نمایش‌داده‌شده باشد
         const closes = [...q.closes]
         if (closes.length) closes[closes.length - 1] = q.price
+        // تغییر ۷/۳۰روزه را دوباره حساب کن تا پرش رولِ قرارداد (کندل امروز از ماه تحویل جدید)
+        // در درصد‌ها نشتی نکند
+        q.change7d = pctFrom(closes, 5)
+        q.change30d = pctFrom(closes, 21)
         await saveQuote(a, { ...q, closes })
         saved++
       } catch {
@@ -615,8 +717,7 @@ export async function runMarketBot(): Promise<{ items: number }> {
     const cryptoJobs = CRYPTO_ASSETS.map(async (a) => {
       try {
         const q = await fetchBinance(a.symbol)
-        const tvSym = TV_ASSET_OVERRIDES[a.symbol]
-        const tv = tvSym ? tvQuotes[tvSym] : undefined
+        const tv = tvQuoteForAsset(a.symbol, tvQuotes)
         if (tv) {
           q.price = tv.price
           q.change1d = tv.changePct
@@ -678,7 +779,7 @@ export async function runMarketBot(): Promise<{ items: number }> {
 // ─── تیک سریع بازار (هر ۳۰ ثانیه): فقط قیمت لحظه‌ای از یک درخواست دسته‌ای تریدینگ‌ویو ───
 // اسپارک‌لاین و تغییرات هفته/ماه در اجرای کامل بات بروز می‌شوند
 export async function runMarketFastQuotes(): Promise<{ items: number }> {
-  const tv = await fetchTradingViewQuotes(Object.values(TV_ASSET_OVERRIDES)).catch(
+  const tv = await fetchTradingViewQuotes(tvTickerList()).catch(
     () => ({}) as Record<string, TvQuote>
   )
   const all: Array<{ symbol: string; name: string; category: string; unit?: string }> = [
@@ -687,8 +788,7 @@ export async function runMarketFastQuotes(): Promise<{ items: number }> {
   ]
   let saved = 0
   for (const a of all) {
-    const tvSym = TV_ASSET_OVERRIDES[a.symbol]
-    const q = tvSym ? tv[tvSym] : undefined
+    const q = tvQuoteForAsset(a.symbol, tv)
     if (!q) continue
     try {
       await db.assetSnapshot.upsert({
