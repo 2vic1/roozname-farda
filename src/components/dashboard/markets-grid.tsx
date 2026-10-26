@@ -14,6 +14,13 @@ function fmtPrice(n: number): string {
   return n.toFixed(4)
 }
 
+// نماد واقعیِ منبعِ قیمت برای نفت — دقیقاً همان نماد واچ‌لیست تریدینگ‌ویو کاربر
+// (برنت = CFD اوآندا، WTI = اسپات؛ کوتی زنده از وب‌سوکت تریدینگ‌ویو)
+const SYMBOL_SOURCE_LABELS: Record<string, string> = {
+  'CL=F': 'CFI:WTI',
+  'BZ=F': 'OANDA:BCOUSD',
+}
+
 function Sparkline({ values, up }: { values: number[]; up: boolean }) {
   if (values.length < 2) return null
   const w = 110
@@ -204,7 +211,7 @@ export function MarketsGrid({ assets, metrics }: { assets: AssetData[]; metrics:
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-zinc-200">{a.name}</p>
                         <p className="mt-0.5 text-[10px] text-zinc-500" dir="ltr">
-                          {a.symbol}
+                          {SYMBOL_SOURCE_LABELS[a.symbol] ?? a.symbol}
                         </p>
                         <p className="mt-1 text-lg font-bold text-zinc-100" dir="ltr">
                           {a.unit === '$' ? '$' : ''}

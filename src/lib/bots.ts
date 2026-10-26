@@ -650,6 +650,48 @@ function tvTickerList(): string[] {
   return [...new Set([...Object.values(TV_ASSET_OVERRIDES), ...oilCandidates])]
 }
 
+// ─── کوتی زنده وب‌سوکت تریدینگ‌ویو (سرویس داخلی mini-services/tv-quotes روی 3030) ───
+// چرا لازم است؟ نمادهای اسپات/CFD نفت در اسکنر عمومی و یاهو وجود ندارند.
+// این‌ها دقیقاً همان نمادهای واچ‌لیست کاربر در تریدینگ‌ویو هستند:
+//   برنت = OANDA:BCOUSD ، WTI اسپات = CFI:WTI
+const OIL_WS_SYMBOLS: Record<string, string> = {
+  'BZ=F': 'OANDA:BCOUSD',
+  'CL=F': 'CFI:WTI',
+}
+const TV_WS_SERVICE = 'http://127.0.0.1:3030/quotes'
+
+interface WsQuote {
+  price: number
+  changePct: number
+}
+
+// کوتی زنده از سرویس وب‌سوکت؛ اگر سرویس پایین بود خالی برمی‌گردد (فالبک به اسکنر/یاهو)
+async function fetchTvWsQuotes(): Promise<Record<string, WsQuote>> {
+  try {
+    const syms = Object.values(OIL_WS_SYMBOLS).join(',')
+    const r = await fetch(`${TV_WS_SERVICE}?symbols=${encodeURIComponent(syms)}`, {
+      signal: AbortSignal.timeout(4000),
+      cache: 'no-store',
+    })
+    if (!r.ok) return {}
+    return (await r.json()) as Record<string, WsQuote>
+  } catch {
+    return {}
+  }
+}
+
+// کوتی وب‌سوکت برای نفت — فقط اگر قیمت معتبر برگردانده شده باشد
+function wsQuoteForOil(
+  symbol: string,
+  ws: Record<string, WsQuote>
+): WsQuote | undefined {
+  const sym = OIL_WS_SYMBOLS[symbol]
+  if (!sym) return undefined
+  const q = ws[sym]
+  if (q && isFinite(q.price) && q.price > 0) return q
+  return undefined
+}
+
 export async function runMarketBot(): Promise<{ items: number }> {
   return logBot('market', async () => {
     let saved = 0
@@ -681,23 +723,32 @@ export async function runMarketBot(): Promise<{ items: number }> {
       })
 
     // یک درخواست برای همه نمادهای تریدینگ‌ویو؛ اگر قطع بود یاهو (کندل‌ها) تنها می‌ماند
-    const tvQuotes = await fetchTradingViewQuotes(tvTickerList()).catch(
-      () => ({}) as Record<string, TvQuote>
-    )
+    const [tvQuotes, wsQuotes] = await Promise.all([
+      fetchTradingViewQuotes(tvTickerList()).catch(() => ({}) as Record<string, TvQuote>),
+      fetchTvWsQuotes(),
+    ])
 
     const yahooJobs = YAHOO_ASSETS.map(async (a) => {
       try {
         const q = await fetchYahoo(a.symbol)
-        const tv = tvQuoteForAsset(a.symbol, tvQuotes)
-        if (tv) {
-          q.price = tv.price
-          q.change1d = tv.changePct
-        } else if (OIL_SOURCES[a.symbol]) {
-          // تریدینگ‌ویو در دسترس نبود: فالبک یاهو هم با قرارداد ماه تحویل، نه پیوسته‌ی رول‌شده
-          const alt = await yahooFrontMonthQuote(a.symbol)
-          if (alt) {
-            q.price = alt.price
-            q.change1d = alt.change1d
+        const wsq = wsQuoteForOil(a.symbol, wsQuotes)
+        if (wsq) {
+          // اولویت ۱: کوتی زنده وب‌سوکت — دقیقاً نماد واچ‌لیست کاربر
+          q.price = wsq.price
+          q.change1d = wsq.changePct
+        } else {
+          const tv = tvQuoteForAsset(a.symbol, tvQuotes)
+          if (tv) {
+            // اولویت ۲: اسکنر با قرارداد ماه تحویل
+            q.price = tv.price
+            q.change1d = tv.changePct
+          } else if (OIL_SOURCES[a.symbol]) {
+            // اولویت ۳: فالبک یاهو با قرارداد ماه تحویل، نه پیوسته‌ی رول‌شده
+            const alt = await yahooFrontMonthQuote(a.symbol)
+            if (alt) {
+              q.price = alt.price
+              q.change1d = alt.change1d
+            }
           }
         }
         // آخرین نقطه اسپارک‌لاین باید دقیقاً برابر قیمت نمایش‌داده‌شده باشد
@@ -779,16 +830,18 @@ export async function runMarketBot(): Promise<{ items: number }> {
 // ─── تیک سریع بازار (هر ۳۰ ثانیه): فقط قیمت لحظه‌ای از یک درخواست دسته‌ای تریدینگ‌ویو ───
 // اسپارک‌لاین و تغییرات هفته/ماه در اجرای کامل بات بروز می‌شوند
 export async function runMarketFastQuotes(): Promise<{ items: number }> {
-  const tv = await fetchTradingViewQuotes(tvTickerList()).catch(
-    () => ({}) as Record<string, TvQuote>
-  )
+  const [tv, wsQuotes] = await Promise.all([
+    fetchTradingViewQuotes(tvTickerList()).catch(() => ({}) as Record<string, TvQuote>),
+    fetchTvWsQuotes(),
+  ])
   const all: Array<{ symbol: string; name: string; category: string; unit?: string }> = [
     ...YAHOO_ASSETS,
     ...CRYPTO_ASSETS.map((c) => ({ ...c, unit: '$' })),
   ]
   let saved = 0
   for (const a of all) {
-    const q = tvQuoteForAsset(a.symbol, tv)
+    // نفت: اول کوتی زنده وب‌سوکت (نماد واچ‌لیست کاربر)، بعد اسکنر
+    const q = wsQuoteForOil(a.symbol, wsQuotes) ?? tvQuoteForAsset(a.symbol, tv)
     if (!q) continue
     try {
       await db.assetSnapshot.upsert({
